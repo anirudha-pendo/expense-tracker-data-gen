@@ -145,3 +145,14 @@ export function makeRng(seed: string): Rng {
 
   return { next, int, pick, weighted, chance };
 }
+
+// --- Budget headroom ---------------------------------------------------------
+//
+// A seeded budget's monthly limit is (expected monthly spend in that
+// category) x a headroom factor drawn per persona/category from this range.
+// Below 1 the limit sits under expected spend (the budget gets exceeded);
+// above 1 it sits comfortably over. This is a genuine tunable — widen the
+// range for more over-budget sessions, narrow it for fewer — unlike the
+// price/description tables in `seed-data.ts`, which nobody tunes.
+export const BUDGET_HEADROOM_MIN = 0.8;
+export const BUDGET_HEADROOM_MAX = 1.4;

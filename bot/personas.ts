@@ -14,7 +14,13 @@
 // graph) — the record types below mirror `src/types/index.ts` field-for-field
 // but are declared locally.
 
-import { makeRng, type Rng, type Region } from "./config";
+import {
+  makeRng,
+  type Rng,
+  type Region,
+  BUDGET_HEADROOM_MIN,
+  BUDGET_HEADROOM_MAX,
+} from "./config";
 import {
   PERSONA_PASSWORD,
   DEFAULT_CATEGORY_SEEDS,
@@ -25,7 +31,6 @@ import {
   EXPENSE_TRANSACTION_RATE,
   BUDGET_COUNT_MIN,
   BUDGET_COUNT_MAX,
-  BUDGET_MONTHLY_LIMIT_MULTIPLIER,
   GOAL_COUNT_MIN,
   GOAL_COUNT_MAX,
   GOAL_CONTRIBUTION_COUNT_MIN,
@@ -542,7 +547,11 @@ function pickHistoryDate(rng: Rng, lookbackMonths: number, now: Date): Date {
   const day = rng.int(1, maxDay);
   const hour = rng.int(0, 23);
   const minute = rng.int(0, 59);
-  return dateFromYm(targetYm, day, hour, minute);
+  const when = dateFromYm(targetYm, day, hour, minute);
+  // When monthsAgo === 0 and day === now's day, hour/minute are still drawn
+  // from the full day — clamp so a "historical" record can never carry a
+  // timestamp later than `now` itself.
+  return new Date(Math.min(when.getTime(), now.getTime()));
 }
 
 interface CategoryEntry {
@@ -625,6 +634,8 @@ function buildBudgets(
   rng: Rng,
   workspaceId: string,
   categoryEntries: CategoryEntry[],
+  transactions: Transaction[],
+  historyMonths: number,
   workspaceCreatedAt: string,
 ): Budget[] {
   const expenseEntries = categoryEntries.filter((e) => e.seed.scope === "expense" || e.seed.scope === "both");
@@ -632,8 +643,21 @@ function buildBudgets(
   const chosen = pickDistinct(rng, expenseEntries, count);
 
   return chosen.map((entry) => {
-    const averageAmount = (entry.seed.amountMin + entry.seed.amountMax) / 2;
-    const monthlyLimit = roundToUnit(averageAmount * BUDGET_MONTHLY_LIMIT_MULTIPLIER, AMOUNT_ROUNDING_UNIT);
+    const categoryTx = transactions.filter((t) => t.categoryId === entry.category.id && t.type === "expense");
+    const hasHistory = categoryTx.length > 0;
+    const averageAmount = hasHistory
+      ? categoryTx.reduce((sum, t) => sum + t.amount, 0) / categoryTx.length
+      : (entry.seed.amountMin + entry.seed.amountMax) / 2;
+    // A category can end up with zero seeded transactions over a short
+    // history window; assume at least one a month rather than dividing by
+    // its true (zero) rate, so the limit still lands on a reachable number.
+    const txPerMonth = hasHistory ? categoryTx.length / historyMonths : 1;
+    const expectedMonthlySpend = averageAmount * txPerMonth;
+    // Headroom varies per persona/category so some run comfortably under
+    // budget (> 1) and others cross it (< 1) — budget-threshold analytics
+    // needs some seeded data that actually exceeds its limit.
+    const headroom = BUDGET_HEADROOM_MIN + rng.next() * (BUDGET_HEADROOM_MAX - BUDGET_HEADROOM_MIN);
+    const monthlyLimit = roundToUnit(expectedMonthlySpend * headroom, AMOUNT_ROUNDING_UNIT) || AMOUNT_ROUNDING_UNIT;
     return {
       id: deterministicId(rng),
       workspaceId,
@@ -663,15 +687,22 @@ function buildGoals(
 
     const contributionCount = rng.int(GOAL_CONTRIBUTION_COUNT_MIN, GOAL_CONTRIBUTION_COUNT_MAX);
     const contributions: GoalContribution[] = [];
-    for (let i = 0; i < contributionCount; i++) {
+    let contributedSoFar = 0;
+    for (let i = 0; i < contributionCount && contributedSoFar < targetAmount; i++) {
       const percent = rng.int(GOAL_CONTRIBUTION_PERCENT_MIN, GOAL_CONTRIBUTION_PERCENT_MAX);
-      const amount = roundToUnit((targetAmount * percent) / 100, AMOUNT_ROUNDING_UNIT) || AMOUNT_ROUNDING_UNIT;
+      const rawAmount = roundToUnit((targetAmount * percent) / 100, AMOUNT_ROUNDING_UNIT) || AMOUNT_ROUNDING_UNIT;
+      // Trim (never exceed) the remaining amount to fund, so a goal can be
+      // fully funded but never overfunded past its target — an overfunded
+      // goal renders as a progress bar past 100%, which reads as a bug.
+      const remaining = targetAmount - contributedSoFar;
+      const amount = Math.min(rawAmount, remaining);
       const when = pickHistoryDate(rng, lookbackMonths, now);
       contributions.push({
         id: deterministicId(rng),
         amount,
         date: toDateOnly(when),
       });
+      contributedSoFar += amount;
     }
     contributions.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
@@ -761,7 +792,14 @@ export function buildSeedData(persona: Persona, now: Date): SeedData {
     archetypeDef.historyTx,
     now,
   );
-  const budgets = buildBudgets(rng, workspaceId, categoryEntries, workspaceCreatedAt);
+  const budgets = buildBudgets(
+    rng,
+    workspaceId,
+    categoryEntries,
+    transactions,
+    archetypeDef.historyMonths,
+    workspaceCreatedAt,
+  );
   const goals = buildGoals(rng, workspaceId, archetypeDef.historyMonths, workspaceCreatedAt, now);
 
   return {

@@ -229,11 +229,14 @@ export const CATEGORY_PRESET_COLORS: string[] = [
 export const EXPENSE_TRANSACTION_RATE = 0.85;
 
 // --- Budgets --------------------------------------------------------------
+//
+// The budget *limit* itself is derived from expected monthly spend (average
+// transaction amount x expected transactions/month) scaled by a headroom
+// factor — that's a genuine behaviour tunable, so it lives in `config.ts`
+// as `BUDGET_HEADROOM_MIN`/`MAX`, not here.
 
 export const BUDGET_COUNT_MIN = 2;
 export const BUDGET_COUNT_MAX = 4;
-/** A monthly budget is set at roughly this many times a category's average single-transaction amount. */
-export const BUDGET_MONTHLY_LIMIT_MULTIPLIER = 5;
 
 // --- Goals ------------------------------------------------------------------
 
