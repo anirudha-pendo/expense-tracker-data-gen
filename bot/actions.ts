@@ -398,7 +398,8 @@ async function openSelect(page: Page, trigger: Locator): Promise<Locator> {
   return listbox;
 }
 
-async function selectOptionByText(page: Page, trigger: Locator, option: string): Promise<void> {
+/** Exported because the run orchestrator's sign-up flow drives the two Radix selects on the workspace-setup page, which is not an app route and so has no action of its own. */
+export async function selectOptionByText(page: Page, trigger: Locator, option: string): Promise<void> {
   const listbox = await openSelect(page, trigger);
   await listbox.getByRole("option", { name: option, exact: true }).first().click();
   await listbox.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });

@@ -2,6 +2,11 @@
 // should contain a magic number — if a behaviour needs tuning, it should be a
 // constant exported from here.
 
+// Type-only import: erased at compile time, so this does NOT create a runtime
+// import cycle with personas.ts (which imports values from here). It buys the
+// two new-visitor knobs below a compile error instead of a silent typo.
+import type { ActionName, Archetype } from "./personas";
+
 // --- Environment-driven basics -------------------------------------------
 
 export const APP_URL: string = process.env.APP_URL ?? "http://localhost:5173";
@@ -273,3 +278,107 @@ export const UI_RESET_MAX_ESCAPES = 5;
 /** How long `resetUiState` lets a layer finish its close animation and unmount before re-checking. */
 export const UI_RESET_SETTLE_MS = 400;
 
+
+// --- Browser contexts -------------------------------------------------------
+//
+// One BrowserContext per session, so no two sessions share storage, cookies
+// or a fingerprint. Both lists are deliberately desktop-only: the app has no
+// distinct mobile layout to exercise, and a phone-sized viewport would change
+// which controls are even on screen.
+
+export interface ViewportSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Every entry is comfortably wider than 1280. At 1280x720 the sonner toasts
+ * (top-right, mounted app-wide) sit over the page header, and Playwright's
+ * actionability checks patiently wait each one out — never a failure, but up
+ * to ~4s added to any click that lands underneath one.
+ */
+export const VIEWPORTS: ViewportSize[] = [
+  { width: 1536, height: 864 },
+  { width: 1600, height: 900 },
+  { width: 1680, height: 1050 },
+  { width: 1920, height: 1080 },
+];
+
+/**
+ * Chrome 151 on the three desktop platforms — 151 is the major version the
+ * bundled Chromium actually reports, so the string never contradicts the
+ * engine behind it. Overriding the UA at all also drops the "HeadlessChrome"
+ * token the default carries.
+ */
+export const USER_AGENTS: string[] = [
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+];
+
+// --- Failure capture --------------------------------------------------------
+
+/**
+ * Bounds the screenshot taken when a session fails. Deliberately short: the
+ * common reason a session fails is that the page stopped responding to
+ * Playwright, and a failure capture that hangs would defeat the per-session
+ * timeout it is being taken because of.
+ */
+export const SCREENSHOT_TIMEOUT_MS = 15000;
+
+// --- New-visitor sessions ---------------------------------------------------
+//
+// A NEW_VISITOR_RATE share of every run's slots signs up through the real UI
+// instead of being seeded. The knobs are here; the name pool and the
+// currency/locale option labels those sessions type are content, and live in
+// seed-data.ts with every other content pool.
+
+/**
+ * Which archetype's action weights and abandon rate a brand-new visitor
+ * borrows. `explorer` is the honest fit: wide navigation, opens a lot of
+ * dialogs, abandons often. Its `sessionLength` is deliberately NOT used —
+ * see NEW_VISITOR_WALK_MIN/MAX.
+ */
+export const NEW_VISITOR_ARCHETYPE: Archetype = "explorer";
+
+/**
+ * How many actions a new visitor takes after finishing sign-up and workspace
+ * setup. Shorter than any archetype's session length on purpose: signing up
+ * and creating a workspace is already most of a first session.
+ */
+export const NEW_VISITOR_WALK_MIN = 3;
+export const NEW_VISITOR_WALK_MAX = 7;
+
+/**
+ * The actions a genuinely fresh account can perform. A new workspace holds
+ * the app's 12 default categories and nothing else — no transactions, no
+ * goals, no budgets — so the actions that act on an existing row
+ * (`editTransaction`, `deleteTransaction`, `contributeToGoal`) would throw
+ * for a reason that is not a defect. `filterTransactions` / `clearFilters`
+ * are left out as pointless against a one-row table, and `signOut` because
+ * ending the walk on step one would waste the sign-up it just did.
+ */
+export const NEW_VISITOR_ACTIONS: ActionName[] = [
+  "navigateDashboard",
+  "navigateTransactions",
+  "navigateInsights",
+  "navigateGoals",
+  "navigateSettings",
+  "addTransaction",
+  "addGoal",
+  "addBudget",
+  "addCategory",
+  "updateProfile",
+  "updateWorkspace",
+  "useQuickAdd",
+  "readInsights",
+];
+
+/** Chance the sign-up form's show/hide password toggle gets clicked. */
+export const NEW_VISITOR_SHOW_PASSWORD_RATE = 0.35;
+/** Chance workspace setup changes the currency select away from its "US Dollar (USD)" default. */
+export const NEW_VISITOR_CURRENCY_CHANGE_RATE = 0.6;
+/** Chance workspace setup changes the number-format select away from its "English (US)" default. */
+export const NEW_VISITOR_LOCALE_CHANGE_RATE = 0.6;
+/** The app's own zod rule (signUpSchema): username is 3-30 chars of [A-Za-z0-9_]. Generated usernames are trimmed to fit. */
+export const SIGNUP_USERNAME_MAX_LEN = 30;

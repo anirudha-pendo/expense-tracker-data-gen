@@ -313,3 +313,61 @@ export const REGION_WORKSPACE_OPTIONS: Record<Region, RegionWorkspaceOption[]> =
 /** A workspace is "created" this many days before the persona's earliest seeded transaction. */
 export const WORKSPACE_CREATED_BUFFER_DAYS_MIN = 1;
 export const WORKSPACE_CREATED_BUFFER_DAYS_MAX = 14;
+
+// --- New visitors -------------------------------------------------------------
+//
+// Content for the sign-up sessions the run orchestrator drives through the
+// real UI. The knobs that decide how often those happen and what they do live
+// in config.ts; the strings they type live here, next to every other content
+// pool.
+
+/**
+ * Display names a brand-new visitor signs up with. Deliberately disjoint from
+ * the 40 PERSONAS — a new visitor is a new person. Every entry is two ASCII
+ * words: the first becomes the username stem, and the app's profile form
+ * needs a surname to offer a "First L." rename variant.
+ */
+export const NEW_VISITOR_NAME_POOL: string[] = [
+  "Alex Carter",
+  "Nadia Haddad",
+  "Tom Whitfield",
+  "Grace Okafor",
+  "Felix Brandt",
+  "Mira Kowalczyk",
+  "Owen Bradley",
+  "Hana Sato",
+  "Diego Morales",
+  "Elena Vasquez",
+  "Rahul Iyer",
+  "Clara Bergman",
+];
+
+// The exact option labels the app's Currency and Number Format selects
+// render, keyed by the code stored on the workspace. Copied verbatim from the
+// CURRENCIES / LOCALES arrays in
+// src/features/workspace/components/workspace-setup-form.tsx — the bot has to
+// click an option by its visible text, and REGION_WORKSPACE_OPTIONS above
+// only carries codes. Complete for every option the app offers, so no
+// REGION_WORKSPACE_OPTIONS entry can ever be unmapped.
+
+export const CURRENCY_OPTION_LABELS: Record<string, string> = {
+  USD: "US Dollar (USD)",
+  EUR: "Euro (EUR)",
+  GBP: "British Pound (GBP)",
+  INR: "Indian Rupee (INR)",
+  JPY: "Japanese Yen (JPY)",
+  CAD: "Canadian Dollar (CAD)",
+  AUD: "Australian Dollar (AUD)",
+  CHF: "Swiss Franc (CHF)",
+  CNY: "Chinese Yuan (CNY)",
+};
+
+export const LOCALE_OPTION_LABELS: Record<string, string> = {
+  "en-US": "English (US)",
+  "en-GB": "English (UK)",
+  "en-IN": "English (India)",
+  "de-DE": "German (Germany)",
+  "fr-FR": "French (France)",
+  "ja-JP": "Japanese (Japan)",
+  "zh-CN": "Chinese (China)",
+};
