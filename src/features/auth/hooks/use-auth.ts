@@ -43,6 +43,15 @@ export function useAuth(): AuthState & AuthActions {
         return;
       }
       setUser(storedUser);
+      pendo.identify({
+        visitor: {
+          id: storedUser.id,
+          full_name: storedUser.displayName,
+          username: storedUser.username,
+          avatarInitials: storedUser.avatarInitials,
+          createdAt: storedUser.createdAt,
+        },
+      });
 
       if (session.workspaceId) {
         const storedWorkspace = await db.get("workspaces", session.workspaceId);
@@ -56,6 +65,7 @@ export function useAuth(): AuthState & AuthActions {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSession();
   }, [loadSession]);
 
@@ -83,6 +93,15 @@ export function useAuth(): AuthState & AuthActions {
 
     await createUser(newUser);
     setUser(newUser);
+    pendo.identify({
+      visitor: {
+        id: newUser.id,
+        full_name: newUser.displayName,
+        username: newUser.username,
+        avatarInitials: newUser.avatarInitials,
+        createdAt: newUser.createdAt,
+      },
+    });
     const session: Session = { userId: newUser.id, workspaceId: "" };
     saveSession(session);
   }, []);
@@ -98,6 +117,15 @@ export function useAuth(): AuthState & AuthActions {
     const workspaces = await getWorkspacesByUserId(storedUser.id);
     const activeWorkspace = workspaces[0] ?? null;
     setWorkspace(activeWorkspace);
+    pendo.identify({
+      visitor: {
+        id: storedUser.id,
+        full_name: storedUser.displayName,
+        username: storedUser.username,
+        avatarInitials: storedUser.avatarInitials,
+        createdAt: storedUser.createdAt,
+      },
+    });
 
     const session: Session = {
       userId: storedUser.id,
@@ -107,6 +135,7 @@ export function useAuth(): AuthState & AuthActions {
   }, []);
 
   const signOut = useCallback(() => {
+    pendo.clearSession();
     clearSession();
     setUser(null);
     setWorkspace(null);
