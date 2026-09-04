@@ -166,3 +166,93 @@ export const BUDGET_HEADROOM_MAX = 1.4;
 // data to actually render, rather than assuming the first navigation is the
 // final one.
 export const SEED_LANDMARK_TIMEOUT_MS = 30000;
+
+// --- UI action timeouts -----------------------------------------------------
+//
+// Deliberately generous. The bot competes with its own think pauses, with
+// sonner toasts that sit over the page header for ~4s before auto-dismissing,
+// and with IndexedDB reads on a workspace carrying up to 180 transactions.
+// A tight timeout here turns a slow render into a spurious action failure,
+// which Task 5 would record as a real defect.
+
+/** How long a navigation waits for the destination route's landmark to render. */
+export const NAV_LANDMARK_TIMEOUT_MS = 20000;
+/** How long a dialog gets to open, or to unmount after being dismissed. */
+export const DIALOG_TIMEOUT_MS = 15000;
+/** How long a success toast gets to appear after the click that triggers it. */
+export const TOAST_TIMEOUT_MS = 15000;
+
+// --- Abandonment ------------------------------------------------------------
+//
+// The per-action abandon *probability* is the persona's (`ctx.abandonRate`,
+// from its archetype). These are the knobs for what abandoning looks like.
+
+/** Given an abandonment, the chance it closes the dialog with Escape rather than the Cancel button. */
+export const ABANDON_VIA_ESCAPE_RATE = 0.5;
+
+// --- Transactions -----------------------------------------------------------
+
+/** A newly entered transaction is dated somewhere in the last this-many days. */
+export const TRANSACTION_BACKDATE_MAX_DAYS = 21;
+/** Chance a newly entered transaction gets an optional note. */
+export const TRANSACTION_NOTES_RATE = 0.25;
+/** Chance a newly entered transaction is flagged recurring. */
+export const TRANSACTION_RECURRING_RATE = 0.12;
+/** Amount range used when a picked category has no entry in the seed-data amount tables (e.g. a category the bot itself created earlier). */
+export const FALLBACK_AMOUNT_MIN = 5;
+export const FALLBACK_AMOUNT_MAX = 250;
+/** Edit/delete pick a row from the first this-many rows, the way a real user acts on what's on screen rather than scrolling to row 140. */
+export const ROW_PICK_LIMIT = 12;
+/** Chance an edit rewrites the description (the amount is always rewritten, so the form is guaranteed to change). */
+export const EDIT_DESCRIPTION_RATE = 0.6;
+
+// --- Filters ----------------------------------------------------------------
+
+/** How many of the four filter controls one `filterTransactions` touches. */
+export const FILTER_COUNT_MIN = 1;
+export const FILTER_COUNT_MAX = 2;
+/** The month filter picks a month between this many months back and the current one. */
+export const FILTER_MONTH_LOOKBACK_MAX = 5;
+
+// --- Goals ------------------------------------------------------------------
+//
+// Goal *names* and target ranges are reused from `seed-data.ts`'s
+// GOAL_SEED_POOL so a bot-created goal is indistinguishable from a seeded
+// one. Only the contribution amount needs its own range: reading the goal's
+// target off the card would mean parsing a locale-formatted currency string.
+
+export const CONTRIBUTION_AMOUNT_MIN = 25;
+export const CONTRIBUTION_AMOUNT_MAX = 600;
+/** Chance a contribution carries an optional note. */
+export const CONTRIBUTION_NOTE_RATE = 0.4;
+
+// --- Budgets ----------------------------------------------------------------
+
+export const BUDGET_LIMIT_MIN = 100;
+export const BUDGET_LIMIT_MAX = 1500;
+/** Budget limits are rounded to a multiple of this. Also the nudge applied when the generated limit happens to equal the one already saved — the app's "Set" button stays disabled until the value actually changes. */
+export const BUDGET_LIMIT_STEP = 50;
+
+// --- Settings ---------------------------------------------------------------
+
+/** Chance `updateWorkspace` also switches the currency select (it always renames the workspace, which is what makes the form dirty enough to save). */
+export const WORKSPACE_CURRENCY_CHANGE_RATE = 0.25;
+/** Chance `updateWorkspace` also switches the number-format/locale select. */
+export const WORKSPACE_LOCALE_CHANGE_RATE = 0.25;
+
+// --- Quick Add --------------------------------------------------------------
+
+/** Chance the command palette is opened with Ctrl+K rather than the header button. */
+export const QUICK_ADD_SHORTCUT_RATE = 0.5;
+
+// --- Insights dwell ---------------------------------------------------------
+//
+// `readInsights` exists purely to produce time-on-page data, so its dwell is
+// several read pauses long rather than one.
+
+export const INSIGHTS_DWELL_PAUSES_MIN = 2;
+export const INSIGHTS_DWELL_PAUSES_MAX = 4;
+/** Chance a dwell pause is preceded by a scroll. Scrolling is not clicking — it keeps `readInsights` a read-only action while still looking alive. */
+export const INSIGHTS_SCROLL_RATE = 0.7;
+export const INSIGHTS_SCROLL_PX_MIN = 200;
+export const INSIGHTS_SCROLL_PX_MAX = 900;
