@@ -4,6 +4,12 @@ export type CategoryScope = "income" | "expense" | "both";
 export interface User {
   id: string;
   username: string;
+  /**
+   * The sign-in identifier. Optional because users created before email
+   * existed have no such field on their stored record — reads must cope with
+   * that; every user created since sign-up gained the field always has one.
+   */
+  email?: string;
   displayName: string;
   avatarInitials: string;
   passwordHash: string;

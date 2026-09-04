@@ -494,5 +494,6 @@ export const NEW_VISITOR_SHOW_PASSWORD_RATE = 0.35;
 export const NEW_VISITOR_CURRENCY_CHANGE_RATE = 0.6;
 /** Chance workspace setup changes the number-format select away from its "English (US)" default. */
 export const NEW_VISITOR_LOCALE_CHANGE_RATE = 0.6;
-/** The app's own zod rule (signUpSchema): username is 3-30 chars of [A-Za-z0-9_]. Generated usernames are trimmed to fit. */
+/** The app's own zod rule (signUpSchema): username is 3-30 chars of [A-Za-z0-9_]. Generated usernames are padded/trimmed to fit. */
+export const SIGNUP_USERNAME_MIN_LEN = 3;
 export const SIGNUP_USERNAME_MAX_LEN = 30;

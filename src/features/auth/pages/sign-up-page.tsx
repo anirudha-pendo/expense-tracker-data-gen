@@ -11,7 +11,7 @@ export function SignUpPage() {
 
   async function handleSignUp(values: SignUpFormValues) {
     try {
-      await signUp(values.username, values.displayName, values.password);
+      await signUp(values.username, values.email, values.displayName, values.password);
       navigate("/setup-workspace", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign up failed");

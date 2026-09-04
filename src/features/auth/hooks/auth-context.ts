@@ -7,8 +7,8 @@ export interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   hasWorkspace: boolean;
-  signUp: (username: string, displayName: string, password: string) => Promise<void>;
-  signIn: (username: string, password: string) => Promise<void>;
+  signUp: (username: string, email: string, displayName: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
   setActiveWorkspace: (workspace: Workspace) => void;
   refreshUser: () => Promise<void>;

@@ -66,7 +66,6 @@ import {
   SESSION_TIMEOUT_MS,
   SHOW_UP_GATE_PERIOD,
   SHOW_UP_SHORTFALL,
-  SIGNUP_USERNAME_MAX_LEN,
   SIGN_OUT_MIN_WALK_FRACTION,
   USER_AGENTS,
   VIEWPORTS,
@@ -87,9 +86,9 @@ import {
 import { ARCHETYPES, PERSONAS, type ActionName, type Persona } from "./personas";
 import { clearBrowserState, seedPersona } from "./seed";
 import {
+  buildNewVisitorIdentity,
   CURRENCY_OPTION_LABELS,
   LOCALE_OPTION_LABELS,
-  NEW_VISITOR_NAME_POOL,
   PERSONA_PASSWORD,
   REGION_WORKSPACE_OPTIONS,
   WORKSPACE_NAME_TEMPLATES,
@@ -162,29 +161,29 @@ function apportion(total: number, weights: number[]): number[] {
 }
 
 /**
- * A username no run has used before.
+ * A brand-new person: name, username and email, all generated from one name
+ * draw (see `buildNewVisitorIdentity` in seed-data.ts).
  *
- * `stamp` is a base-36 wall-clock reading, not randomness — the PRNG cannot
- * help here, because a deterministic username would collide with itself the
- * second time the same plan runs against the same app, and sign-up rejects a
- * taken username. The slot index keeps the names inside one run distinct.
- * The stem is trimmed so the whole thing stays inside the app's 3-30
- * character rule, and the pool's names are ASCII so it stays inside
- * `[A-Za-z0-9_]`.
+ * Nothing here guards against two sessions drawing the same identity, and
+ * nothing needs to. Each session runs in its own `browser.newContext()` — an
+ * isolated storage partition — and `signUpNewVisitor` clears that partition
+ * before it starts, so the app's uniqueness check (a `by-username` /
+ * `by-email` lookup against its own IndexedDB) only ever sees the one user
+ * about to be created. Two identical usernames in two contexts never meet.
+ *
+ * That is what lets the identity come from the seeded PRNG at all. The old
+ * code appended a base-36 wall-clock stamp precisely because it assumed a
+ * shared database — and that stamp was the thing making these read as test
+ * data and getting them discarded.
  */
-function newVisitorUsername(displayName: string, stamp: string, index: number): string {
-  const suffix = `_${stamp}${index}`;
-  const stem = displayName.split(" ")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
-  return `${stem.slice(0, SIGNUP_USERNAME_MAX_LEN - suffix.length)}${suffix}`;
-}
-
-function newVisitorPersona(rng: Rng, region: Region, stamp: string, index: number): Persona {
-  const displayName = rng.pick(NEW_VISITOR_NAME_POOL);
+function newVisitorPersona(rng: Rng, region: Region, index: number): Persona {
+  const identity = buildNewVisitorIdentity(rng);
   return {
     id: `new-visitor-${index}`,
-    username: newVisitorUsername(displayName, stamp, index),
+    username: identity.username,
+    email: identity.email,
     password: PERSONA_PASSWORD,
-    displayName,
+    displayName: identity.displayName,
     accountId: NEW_VISITOR_ACCOUNT_ID,
     region,
     archetype: NEW_VISITOR_ARCHETYPE,
@@ -211,9 +210,9 @@ function showsUp(persona: Persona, now: Date, planRng: Rng): boolean {
 
 /**
  * Builds the whole run's session plan. Pure: no browser, no I/O, no clock of
- * its own — everything comes from `now` and the seeded PRNG (bar the
- * collision-proofing stamp explained above). That is what lets BOT_DRY_RUN
- * print exactly what a real run would do.
+ * its own — everything comes from `now` and the seeded PRNG, new-visitor
+ * identities included. That is what lets BOT_DRY_RUN print exactly what a
+ * real run would do.
  *
  * `totalOverride` is BOT_SESSIONS: a total, split across the regions in the
  * same proportion the hour's curve gives them. It is a CEILING, not an exact
@@ -222,7 +221,6 @@ function showsUp(persona: Persona, now: Date, planRng: Rng): boolean {
  */
 export function buildPlan(now: Date, totalOverride: number | null = null): SessionPlan {
   const rng = makeRng(`plan:${now.toISOString()}`);
-  const stamp = Date.now().toString(36);
   const hour = now.getUTCHours();
 
   const requestedPerRegion = {} as Record<Region, number>;
@@ -267,7 +265,7 @@ export function buildPlan(now: Date, totalOverride: number | null = null): Sessi
           index,
           region,
           kind: "new-visitor",
-          persona: newVisitorPersona(rng, region, stamp, index),
+          persona: newVisitorPersona(rng, region, index),
           seed,
         });
         planned += 1;
@@ -509,6 +507,7 @@ async function signUpNewVisitor(page: Page, ctx: SessionCtx): Promise<void> {
 
   await page.locator("#displayName").fill(persona.displayName);
   await page.locator("#username").fill(persona.username);
+  await page.locator("#email").fill(persona.email);
   await page.locator("#password").fill(persona.password);
   if (ctx.rng.chance(NEW_VISITOR_SHOW_PASSWORD_RATE)) {
     await page.getByRole("button", { name: "Show password", exact: true }).click();
@@ -543,7 +542,7 @@ async function signUpNewVisitor(page: Page, ctx: SessionCtx): Promise<void> {
   // just its heading (AppLayout paints the heading over skeletons).
   await page.getByRole("heading", { name: "Dashboard", level: 1 }).waitFor({ timeout: SEED_LANDMARK_TIMEOUT_MS });
   await page.getByText("Income", { exact: true }).first().waitFor({ timeout: SEED_LANDMARK_TIMEOUT_MS });
-  ctx.log(`signed up as ${persona.username} and created "${workspaceName}"`);
+  ctx.log(`signed up as ${persona.username} <${persona.email}> and created "${workspaceName}"`);
   await think(page, ctx);
 }
 

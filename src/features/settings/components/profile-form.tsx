@@ -80,6 +80,15 @@ export function ProfileForm() {
         <p className="text-xs text-muted-foreground">Username cannot be changed.</p>
       </div>
 
+      <div className="flex flex-col gap-1">
+        <Label>Email</Label>
+        {/* `?? ""` is load-bearing: accounts created before email existed have
+            no such field, and a bare `user?.email` would make this a React
+            uncontrolled-input warning showing nothing. */}
+        <Input value={user?.email ?? ""} disabled />
+        <p className="text-xs text-muted-foreground">Email cannot be changed.</p>
+      </div>
+
       <Button type="submit" disabled={isSubmitting || !isDirty} className="self-start">
         {isSubmitting && <Loader2 data-icon="inline-start" className="animate-spin" />}
         Save changes

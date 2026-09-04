@@ -11,7 +11,7 @@ export function SignInPage() {
 
   async function handleSignIn(values: SignInFormValues) {
     try {
-      await signIn(values.username, values.password);
+      await signIn(values.email, values.password);
       navigate(hasWorkspace ? "/" : "/setup-workspace", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");

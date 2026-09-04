@@ -444,7 +444,50 @@ workspace-setup forms instead, as a genuinely new person. This exists so
 new-visitor and onboarding-funnel data — sign-up completion, workspace
 creation, first transaction — actually shows up in the analytics too,
 instead of only ever seeing 40 people who have already been using the app
-for months.
+for months. The sign-up form the bot fills is display name, username, email,
+password and confirm password; the account it creates signs in by **email**.
+
+## Usernames and emails are generated, never listed
+
+Analytics discards identity data that looks synthetic, so no handle in this
+bot is written down anywhere. `buildIdentity` in `seed-data.ts` takes a real
+name, a domain and the seeded PRNG, and derives both a username and an email
+from that one name — so the two always belong to the same person, which a
+hand-written pairs table never quite manages.
+
+- **Registers.** A draw picks `full` / `initialled` / `compact` first, then a
+  pattern inside it, so `psharma` gets `p.sharma@` and `priya_sharma` gets
+  `priya.sharma@`. A 25% drift chance lets the email land in a different
+  register, because real people are inconsistent.
+- **Numbers are birth years.** `91`, `1987` — never `1`, `2`, `3`. The range
+  stops at 1999 so a two-digit suffix can never come out as `01` and read as
+  sequential numbering.
+- **Usernames obey the app.** 3–30 characters of `[A-Za-z0-9_]`, so no dots
+  and no `@`; emails use dots freely, because real ones do. Accented names are
+  ASCII-folded (`Müller` → `muller`).
+- **Roughly 7,800 username/email pairs per person**, before names and domains
+  multiply in.
+
+**Personas** take their domain from their account — every member of "Bengaluru
+FinCollective" is `@fincollective.in`, which is what makes an account read as
+one company. Their identity is generated once at module load off
+`makeRng("identity:<persona id>")`: its own PRNG stream, deliberately not the
+one `buildSeedData` uses, so adding identities did not shift a single
+transaction in any persona's history. The identities are stable run to run.
+The persona **UUIDs are untouched by any of this** — see the rule above.
+
+**New visitors** are individuals, not company members, so they draw from
+`NEW_VISITOR_FIRST_NAMES` (48) × `NEW_VISITOR_LAST_NAMES` (40) and land on a
+consumer provider from `CONSUMER_EMAIL_DOMAINS` — about 150 million distinct
+identities in total.
+
+Nothing deduplicates any of this, and nothing needs to: every session runs in
+its own `browser.newContext()`, and a new-visitor session clears that storage
+partition before signing up, so the app's uniqueness check only ever sees the
+one user about to be created. Two sessions drawing the same name never meet.
+That is precisely why the identity can come from the seeded PRNG at all — the
+old code appended a wall-clock stamp (`nadia_mtnaiafj4`) because it assumed a
+shared database, and that stamp was the thing getting the data thrown away.
 
 ## Gotchas for future maintainers
 

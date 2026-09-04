@@ -53,6 +53,21 @@ export function SignUpForm({ onSubmit }: SignUpFormProps) {
       </div>
 
       <div className="flex flex-col gap-2">
+        <Label htmlFor="email">Email</Label>
+        <Input
+          id="email"
+          type="email"
+          placeholder="jane.doe@email.com"
+          autoComplete="email"
+          aria-invalid={!!errors.email}
+          {...register("email")}
+        />
+        {errors.email && (
+          <p className="text-sm text-destructive">{errors.email.message}</p>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
         <Label htmlFor="password">Password</Label>
         <div className="relative">
           <Input
