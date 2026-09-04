@@ -86,6 +86,18 @@ export function GoalsPage() {
         percentCompleteAfter: Math.round((totalSaved / contributingGoal.targetAmount) * 100),
         contributionCount: contributingGoal.contributions.length + 1,
       });
+      if (totalSaved >= contributingGoal.targetAmount) {
+        const daysToComplete = Math.round(
+          (Date.now() - new Date(contributingGoal.createdAt).getTime()) / (1000 * 60 * 60 * 24),
+        );
+        pendo?.track("goal_completed", {
+          goalName: contributingGoal.name,
+          targetAmount: contributingGoal.targetAmount,
+          totalSaved,
+          contributionCount: contributingGoal.contributions.length + 1,
+          daysToComplete,
+        });
+      }
       setContributingGoal(null);
       toast.success("Contribution added");
     } catch {
