@@ -84,9 +84,15 @@ export function ProfileForm() {
         <Label>Email</Label>
         {/* `?? ""` is load-bearing: accounts created before email existed have
             no such field, and a bare `user?.email` would make this a React
-            uncontrolled-input warning showing nothing. */}
+            uncontrolled-input warning showing nothing. The helper text below
+            says so, because an unexplained blank box on the field you now
+            sign in with reads as data loss. */}
         <Input value={user?.email ?? ""} disabled />
-        <p className="text-xs text-muted-foreground">Email cannot be changed.</p>
+        <p className="text-xs text-muted-foreground">
+          {user?.email
+            ? "Email cannot be changed."
+            : "Accounts created before email was added have none — create a new account to sign in."}
+        </p>
       </div>
 
       <Button type="submit" disabled={isSubmitting || !isDirty} className="self-start">

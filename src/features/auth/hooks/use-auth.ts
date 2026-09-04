@@ -14,8 +14,22 @@ interface AuthState {
   hasWorkspace: boolean;
 }
 
+/**
+ * Sign-up takes an object, not four positional strings. Email is the login
+ * identifier now, so transposing it with `username` would create an account
+ * nobody can ever sign in to — and as four same-typed parameters that
+ * transposition compiled silently and threw nothing at runtime. Named fields
+ * make it a compile error.
+ */
+export interface SignUpInput {
+  username: string;
+  email: string;
+  displayName: string;
+  password: string;
+}
+
 interface AuthActions {
-  signUp: (username: string, email: string, displayName: string, password: string) => Promise<void>;
+  signUp: (input: SignUpInput) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
   setActiveWorkspace: (workspace: Workspace) => void;
@@ -59,7 +73,7 @@ export function useAuth(): AuthState & AuthActions {
     loadSession();
   }, [loadSession]);
 
-  const signUp = useCallback(async (username: string, email: string, displayName: string, password: string) => {
+  const signUp = useCallback(async ({ username, email, displayName, password }: SignUpInput) => {
     // Both are unique in IndexedDB, so both are checked up front: email
     // because it is the sign-in identifier, username because its unique
     // index would otherwise reject the write with a raw ConstraintError

@@ -2,7 +2,7 @@
 
 Spec: docs/superpowers/specs/2026-09-04-usage-bot-design.md
 Branch: feat/usage-bot
-UI map (shared input for tasks 3/4/5): .superpowers/sdd/ui-map.md
+UI map (shared input for tasks 3/4/5): docs/superpowers/ui-map.md
 
 ## Pre-flight scan
 
@@ -54,7 +54,7 @@ Ruling: T3's post-seed wait targets the authenticated dashboard landmark **after
 
 Task 1: dispatched (model sonnet, BASE ef20c27) — scaffold, config, traffic curve, selftest harness
 Note: `scripts/task-brief` extracts only a task's own section, so the plan's shared "## Exact values" block was missing from every brief. Appended it to all 7 brief files and re-sent it to the running Task 1 agent.
-UI map: Explore agent had no write tool; controller wrote `.superpowers/sdd/ui-map.md` from its returned content. Available for T3/T4/T5.
+UI map: Explore agent had no write tool; controller wrote `docs/superpowers/ui-map.md` from its returned content. Available for T3/T4/T5.
 Task 1: implementer DONE (commit 46ff121, 7/7 selftest, tsc clean). Task reviewer dispatched (sonnet, ef20c27..46ff121).
 Task 1: review clean — spec compliant, 0 Critical, 0 Important, 3 Minor.
 Task 1: minor (deferred): tsconfig.json carries conventional fields beyond the brief's five (module/esModuleInterop/skipLibCheck etc.) — harmless.

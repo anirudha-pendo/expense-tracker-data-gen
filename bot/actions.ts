@@ -4,7 +4,7 @@
 // time-on-page. Nothing in here reaches into the app's state, its router or
 // its database — if a user cannot do it by clicking, the bot does not do it.
 //
-// Every selector below comes from `.superpowers/sdd/ui-map.md`, which was
+// Every selector below comes from `docs/superpowers/ui-map.md`, which was
 // built by reading each component's source. Two traps that map records and
 // that this file leans on constantly:
 //   - Radix `Select`s are not native `<select>` elements. Click the trigger,
