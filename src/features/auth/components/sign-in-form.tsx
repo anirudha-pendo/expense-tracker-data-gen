@@ -25,16 +25,17 @@ export function SignInForm({ onSubmit }: SignInFormProps) {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
-        <Label htmlFor="username">Username</Label>
+        <Label htmlFor="email">Email</Label>
         <Input
-          id="username"
-          placeholder="your_username"
-          autoComplete="username"
-          aria-invalid={!!errors.username}
-          {...register("username")}
+          id="email"
+          type="email"
+          placeholder="you@email.com"
+          autoComplete="email"
+          aria-invalid={!!errors.email}
+          {...register("email")}
         />
-        {errors.username && (
-          <p className="text-sm text-destructive">{errors.username.message}</p>
+        {errors.email && (
+          <p className="text-sm text-destructive">{errors.email.message}</p>
         )}
       </div>
 

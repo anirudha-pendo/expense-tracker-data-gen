@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import type { User, Workspace } from "@/types";
+import type { SignUpInput } from "./use-auth";
 
 export interface AuthContextValue {
   user: User | null;
@@ -7,8 +8,8 @@ export interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   hasWorkspace: boolean;
-  signUp: (username: string, displayName: string, password: string) => Promise<void>;
-  signIn: (username: string, password: string) => Promise<void>;
+  signUp: (input: SignUpInput) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
   setActiveWorkspace: (workspace: Workspace) => void;
   refreshUser: () => Promise<void>;

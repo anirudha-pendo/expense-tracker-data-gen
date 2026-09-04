@@ -14,7 +14,7 @@ records genuine behaviour. It runs on GitHub Actions on a schedule and can also
 be triggered remotely.
 
 **A UI map of the whole app has already been written to
-`.superpowers/sdd/ui-map.md`.** It records every interactive element, its label,
+`docs/superpowers/ui-map.md`.** It records every interactive element, its label,
 its attributes, the radix Select options, the dialog flows, the validation rules
 and the per-route loading landmarks. Tasks that write selectors must read it
 first rather than re-deriving it.
@@ -255,7 +255,7 @@ Export `seedPersona(page: Page, persona: Persona): Promise<void>` which:
 5. Writes `localStorage["expense_tracker_session"]` as
    `{"userId": persona.id, "workspaceId": <workspace id>}`.
 6. Reloads the page and waits for the dashboard landmark named in
-   `.superpowers/sdd/ui-map.md`.
+   `docs/superpowers/ui-map.md`.
 
 Also export `clearBrowserState(page: Page): Promise<void>` that deletes the
 database and clears localStorage, for the new-visitor path.
@@ -277,7 +277,7 @@ Delete the throwaway script before committing.
 
 ## Task 4 — The UI action library
 
-Create `bot/actions.ts`. **Read `.superpowers/sdd/ui-map.md` first** — it
+Create `bot/actions.ts`. **Read `docs/superpowers/ui-map.md` first** — it
 already contains every selector, label, dialog flow and validation rule you need.
 
 Define and export:

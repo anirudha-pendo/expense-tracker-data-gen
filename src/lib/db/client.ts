@@ -2,7 +2,7 @@ import { openDB, type IDBPDatabase } from "idb";
 import type { ExpenseTrackerDBSchema } from "./schema";
 
 const DB_NAME = "expense-tracker";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbInstance: IDBPDatabase<ExpenseTrackerDBSchema> | null = null;
 
@@ -10,7 +10,7 @@ export async function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<ExpenseTrackerDBSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion) {
+    upgrade(db, oldVersion, _newVersion, transaction) {
       if (oldVersion < 1) {
         const userStore = db.createObjectStore("users", { keyPath: "id" });
         userStore.createIndex("by-username", "username", { unique: true });
@@ -37,6 +37,16 @@ export async function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
         const attachmentStore = db.createObjectStore("attachments", { keyPath: "id" });
         attachmentStore.createIndex("by-workspaceId", "workspaceId");
         attachmentStore.createIndex("by-transactionId", "transactionId");
+      }
+
+      if (oldVersion < 3) {
+        // Email became the sign-in identifier, so it needs the same unique
+        // index username already had. Users stored before this version carry
+        // no email at all; a unique index simply leaves those records out of
+        // itself rather than rejecting them, so the upgrade is safe on an
+        // existing database (those users can no longer sign in, which is
+        // accepted).
+        transaction.objectStore("users").createIndex("by-email", "email", { unique: true });
       }
     },
     // Close this connection if another tab upgrades to a newer version,

@@ -7,6 +7,7 @@ export interface ExpenseTrackerDBSchema extends DBSchema {
     value: User;
     indexes: {
       "by-username": string;
+      "by-email": string;
     };
   };
   workspaces: {

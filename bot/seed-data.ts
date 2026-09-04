@@ -10,11 +10,14 @@
 // They're seed data, so they live here instead, keeping `config.ts` short
 // and scannable.
 //
-// All of this is inert data — no randomness, no dates, no ids. The actual
-// generation logic (which draws from these tables via the seeded PRNG) lives
-// in `bot/personas.ts`.
+// Almost all of this is inert data — no randomness, no dates, no ids. The
+// generation logic that draws from these tables via the seeded PRNG lives in
+// `bot/personas.ts`. The one exception is the username/email generator below:
+// handles have to be derived from a name rather than listed, so the pools and
+// the small pure function that combines them belong together, here, next to
+// every other content pool.
 
-import type { Region } from "./config";
+import { SIGNUP_USERNAME_MAX_LEN, SIGNUP_USERNAME_MIN_LEN, type Region, type Rng } from "./config";
 
 // --- Persona identity & credentials ------------------------------------------
 
@@ -24,6 +27,176 @@ import type { Region } from "./config";
  * secrets in the repo" constraint, which this does not violate.
  */
 export const PERSONA_PASSWORD = "UsageBot#2026";
+
+// --- Username / email generation ---------------------------------------------
+//
+// Handles are DERIVED from a person's real name rather than listed, so a
+// username and an email always belong to the same human and neither reads as
+// a generated string. That is the whole point: analytics discards identity
+// data that looks synthetic, and "first name + timestamp" was the clearest
+// possible tell.
+//
+// Pure functions of (name, domain, rng) — same three arguments in, same
+// identity out, so the 40 personas are stable run to run.
+
+export interface Identity {
+  username: string;
+  email: string;
+}
+
+interface NameParts {
+  first: string;
+  last: string;
+}
+
+/**
+ * Lowercase ASCII form of one name word: "Muller" from "Müller",
+ * "fernandez" from "Fernández", "obrien" from "O'Brien". The app's username
+ * rule is `[A-Za-z0-9_]` only, so anything a fold leaves behind is dropped
+ * rather than substituted.
+ */
+function asciiFold(word: string): string {
+  return word
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Splits a display name into ASCII-folded first and last parts. Throws on a
+ * name with no surname rather than quietly producing a one-word handle: every
+ * caller supplies two words, so a single word means the pool or a PERSONA row
+ * is wrong, and that is worth failing loudly at startup.
+ */
+function nameParts(displayName: string): NameParts {
+  const words = displayName.trim().split(/\s+/).map(asciiFold).filter((word) => word.length > 0);
+  if (words.length < 2) {
+    throw new Error(`"${displayName}" has no usable surname — identities need a first and a last name`);
+  }
+  return { first: words[0], last: words[words.length - 1] };
+}
+
+/**
+ * The three registers a real person picks a handle in. Drawing a register
+ * first, then a pattern from it, is what keeps a username and an email
+ * recognisably the same person's: someone terse enough to be `psharma` is
+ * unlikely to hand out `priya.sharma@`.
+ */
+type IdentityStyle = "full" | "initialled" | "compact";
+
+const IDENTITY_STYLES: IdentityStyle[] = ["full", "initialled", "compact"];
+
+/** Username shapes. No dots and no "@" anywhere — the app rejects both. */
+const USERNAME_PATTERNS: Record<IdentityStyle, ((name: NameParts) => string)[]> = {
+  full: [
+    ({ first, last }) => `${first}_${last}`,
+    ({ first, last }) => `${first}${last}`,
+    ({ first, last }) => `${last}_${first}`,
+  ],
+  initialled: [
+    ({ first, last }) => `${first[0]}${last}`,
+    ({ first, last }) => `${first}_${last[0]}`,
+    ({ first, last }) => `${first}${last[0]}`,
+  ],
+  compact: [
+    ({ first }) => first,
+    ({ first, last }) => `${first}${last.slice(0, 2)}`,
+    ({ first, last }) => `${first[0]}_${last}`,
+  ],
+};
+
+/** Email local parts. Dots are the norm here, which is exactly why they read as real. */
+const EMAIL_LOCAL_PATTERNS: Record<IdentityStyle, ((name: NameParts) => string)[]> = {
+  full: [
+    ({ first, last }) => `${first}.${last}`,
+    ({ first, last }) => `${first}${last}`,
+    ({ first, last }) => `${first}_${last}`,
+  ],
+  initialled: [
+    ({ first, last }) => `${first[0]}.${last}`,
+    ({ first, last }) => `${first}.${last[0]}`,
+    ({ first, last }) => `${last}.${first[0]}`,
+  ],
+  compact: [
+    ({ first }) => first,
+    ({ first, last }) => `${first}${last[0]}`,
+    ({ first, last }) => `${first[0]}${last}`,
+  ],
+};
+
+/**
+ * Chance the email is written in a different register from the username.
+ * Non-zero because people genuinely are inconsistent — a work address is
+ * assigned, a username is chosen — but low, so the two stay recognisably one
+ * person's most of the time.
+ */
+const IDENTITY_STYLE_DRIFT_CHANCE = 0.25;
+/** Chance a handle carries a number at all. Most people's do not. */
+const IDENTITY_NUMBER_SUFFIX_CHANCE = 0.28;
+/** Given a number, the chance it is the full year (`1991`) rather than two digits (`91`). */
+const IDENTITY_FULL_YEAR_CHANCE = 0.3;
+/** Given a numbered username, the chance the same number also shows up in the email. */
+const IDENTITY_SHARED_NUMBER_CHANCE = 0.45;
+/**
+ * The number is a birth year, never a counter — `91` reads as a person, `2`
+ * reads as a fixture. The range stops at 1999 on purpose: a 2001 birth year
+ * abbreviates to `01`, which is indistinguishable from the sequential
+ * numbering this work exists to get rid of.
+ */
+const IDENTITY_BIRTH_YEAR_MIN = 1974;
+const IDENTITY_BIRTH_YEAR_MAX = 1999;
+
+/**
+ * Forces a generated username inside the app's 3-30 character rule. Short
+ * handles (`tom`, `jan`) are grown with the surname rather than padded with
+ * digits, which would look exactly like the fixture data this replaces; long
+ * ones are cut and never left ending in an underscore.
+ */
+function fitUsername(candidate: string, name: NameParts): string {
+  let username = candidate;
+  if (username.length < SIGNUP_USERNAME_MIN_LEN) username = `${name.first}_${name.last}`;
+  if (username.length > SIGNUP_USERNAME_MAX_LEN) {
+    username = username.slice(0, SIGNUP_USERNAME_MAX_LEN).replace(/_+$/, "");
+  }
+  return username;
+}
+
+/**
+ * A username and an email for one person on one domain.
+ *
+ * Both come off the same name and the same register draw, and the email is
+ * nudged onto a different pattern whenever the two would otherwise come out
+ * byte-identical — real people do not use one format in both places.
+ */
+export function buildIdentity(rng: Rng, displayName: string, domain: string): Identity {
+  const name = nameParts(displayName);
+
+  const style = rng.pick(IDENTITY_STYLES);
+  const emailStyle = rng.chance(IDENTITY_STYLE_DRIFT_CHANCE) ? rng.pick(IDENTITY_STYLES) : style;
+
+  const year = rng.int(IDENTITY_BIRTH_YEAR_MIN, IDENTITY_BIRTH_YEAR_MAX);
+  const numbered = rng.chance(IDENTITY_NUMBER_SUFFIX_CHANCE);
+  const suffix = !numbered
+    ? ""
+    : rng.chance(IDENTITY_FULL_YEAR_CHANCE)
+      ? String(year)
+      : String(year % 100).padStart(2, "0");
+  const emailSuffix = suffix !== "" && rng.chance(IDENTITY_SHARED_NUMBER_CHANCE) ? suffix : "";
+
+  const username = fitUsername(`${rng.pick(USERNAME_PATTERNS[style])(name)}${suffix}`, name);
+
+  const localPatterns = EMAIL_LOCAL_PATTERNS[emailStyle];
+  const localIndex = rng.int(0, localPatterns.length - 1);
+  let local = `${localPatterns[localIndex](name)}${emailSuffix}`;
+  // Same string in both places is the one shape that gives the generator
+  // away, so step to the next pattern in the register rather than shipping it.
+  if (local === username) {
+    local = `${localPatterns[(localIndex + 1) % localPatterns.length](name)}${emailSuffix}`;
+  }
+
+  return { username, email: `${local}@${domain}` };
+}
 
 // --- Categories ---------------------------------------------------------------
 
@@ -322,25 +495,60 @@ export const WORKSPACE_CREATED_BUFFER_DAYS_MAX = 14;
 // pool.
 
 /**
- * Display names a brand-new visitor signs up with. Deliberately disjoint from
- * the 40 PERSONAS — a new visitor is a new person. Every entry is two ASCII
- * words: the first becomes the username stem, and the app's profile form
- * needs a surname to offer a "First L." rename variant.
+ * First and last names a brand-new visitor signs up with, drawn independently
+ * and combined, so the two pools multiply out to 48 x 40 = 1,920 distinct
+ * people rather than the dozen a list of full names gave. Deliberately
+ * disjoint from the 40 PERSONAS — a new visitor is a new person — and ASCII
+ * throughout, since the app's username rule is `[A-Za-z0-9_]` only. A surname
+ * is mandatory: the profile form's rename action needs one to offer its
+ * "First L." variant.
  */
-export const NEW_VISITOR_NAME_POOL: string[] = [
-  "Alex Carter",
-  "Nadia Haddad",
-  "Tom Whitfield",
-  "Grace Okafor",
-  "Felix Brandt",
-  "Mira Kowalczyk",
-  "Owen Bradley",
-  "Hana Sato",
-  "Diego Morales",
-  "Elena Vasquez",
-  "Rahul Iyer",
-  "Clara Bergman",
+export const NEW_VISITOR_FIRST_NAMES: string[] = [
+  "Alex", "Nadia", "Tom", "Grace", "Felix", "Mira", "Owen", "Hana",
+  "Diego", "Elena", "Rahul", "Clara", "Nina", "Victor", "Amara", "Jonas",
+  "Leah", "Omar", "Sofia", "Caleb", "Yuki", "Marta", "Dylan", "Ines",
+  "Nikhil", "Bianca", "Theo", "Ayesha", "Gustav", "Naomi", "Elias", "Tara",
+  "Mateo", "Zara", "Hugo", "Simone", "Ravi", "Beatrix", "Callum", "Anika",
+  "Pierre", "Delia", "Samir", "Greta", "Noor", "Adrian", "Lena", "Kofi",
 ];
+
+export const NEW_VISITOR_LAST_NAMES: string[] = [
+  "Carter", "Haddad", "Whitfield", "Okafor", "Brandt", "Kowalczyk", "Bradley", "Sato",
+  "Morales", "Vasquez", "Iyer", "Bergman", "Lindqvist", "Novak", "Delgado", "Osei",
+  "Ferrara", "Bhattacharya", "Keane", "Moreau", "Vandenberg", "Salazar", "Nakamura", "Ellsworth",
+  "Radich", "Baptiste", "Hollingsworth", "Aziz", "Quinn", "Tremblay", "Sandoval", "Fitzgerald",
+  "Ibarra", "Grimaldi", "Petersen", "Chowdhury", "Marchetti", "Kessler", "Duval", "Ashworth",
+];
+
+/**
+ * Where an individual signing up on their own keeps their mail. Real consumer
+ * providers on purpose: a new visitor is not a company member, so an invented
+ * company domain would be the wrong shape, and anything from the
+ * example.com/test.com family is exactly the tell this work exists to remove.
+ */
+export const CONSUMER_EMAIL_DOMAINS: string[] = [
+  "gmail.com",
+  "outlook.com",
+  "yahoo.com",
+  "icloud.com",
+  "proton.me",
+  "hotmail.com",
+  "fastmail.com",
+  "gmx.net",
+  "live.com",
+  "zoho.com",
+];
+
+export interface VisitorIdentity extends Identity {
+  displayName: string;
+}
+
+/** A whole new person: name, username, and an email on a consumer provider. */
+export function buildNewVisitorIdentity(rng: Rng): VisitorIdentity {
+  const displayName = `${rng.pick(NEW_VISITOR_FIRST_NAMES)} ${rng.pick(NEW_VISITOR_LAST_NAMES)}`;
+  const domain = rng.pick(CONSUMER_EMAIL_DOMAINS);
+  return { displayName, ...buildIdentity(rng, displayName, domain) };
+}
 
 // The exact option labels the app's Currency and Number Format selects
 // render, keyed by the code stored on the workspace. Copied verbatim from the

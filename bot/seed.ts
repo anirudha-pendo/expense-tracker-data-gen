@@ -19,9 +19,11 @@ import { buildSeedData, type Persona, type SeedData } from "./personas";
 
 // Mirrors src/lib/db/client.ts's DB_NAME / DB_VERSION exactly. Drifting from
 // these means the app either fails to open the database this seeds, or opens
-// a different, empty one.
+// a different, empty one. Version 3 added the unique `by-email` index on
+// `users` when email became the sign-in identifier — bump both files together
+// or not at all.
 const DB_NAME = "expense-tracker";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // Mirrors the key in src/lib/session.ts exactly.
 const SESSION_STORAGE_KEY = "expense_tracker_session";
@@ -111,9 +113,22 @@ export async function seedPersona(page: Page, persona: Persona): Promise<void> {
       request.onupgradeneeded = () => {
         const db = request.result;
 
+        // Two paths to the same schema. A fresh database creates the store
+        // with both indexes; a database this bot (or the app) already created
+        // at v2 has the store but not `by-email`, and gets the index added
+        // on the versionchange transaction the way the app's own
+        // `oldVersion < 3` block does. Either way the end state matches
+        // src/lib/db/client.ts exactly — same indexes, same unique flags —
+        // which is the whole contract this file lives or dies by.
         if (!db.objectStoreNames.contains("users")) {
           const userStore = db.createObjectStore("users", { keyPath: "id" });
           userStore.createIndex("by-username", "username", { unique: true });
+          userStore.createIndex("by-email", "email", { unique: true });
+        } else if (request.transaction !== null) {
+          const userStore = request.transaction.objectStore("users");
+          if (!userStore.indexNames.contains("by-email")) {
+            userStore.createIndex("by-email", "email", { unique: true });
+          }
         }
         if (!db.objectStoreNames.contains("workspaces")) {
           const workspaceStore = db.createObjectStore("workspaces", { keyPath: "id" });

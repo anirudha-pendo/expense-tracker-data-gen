@@ -11,7 +11,7 @@ export function SignInPage() {
 
   async function handleSignIn(values: SignInFormValues) {
     try {
-      await signIn(values.username, values.password);
+      await signIn(values.email, values.password);
       pendo?.track("sign_in_completed", {
         hasWorkspace,
       });
