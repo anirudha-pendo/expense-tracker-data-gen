@@ -52,8 +52,16 @@ These bind every task. A reviewer treats a violation as a defect.
    one-time IndexedDB seed. An analytics agent only sees real interactions.
 6. **A failed session never aborts the run.** Every session is individually
    wrapped. Failures are counted and reported.
-7. **No test framework.** `bot/selftest.ts` uses `node:assert` only. No vitest,
-   no jest, no fixtures.
+7. **No new tests.** The user has ruled that this is a throwaway test app and
+   does not want test code written for it. `bot/selftest.ts` already exists from
+   Tasks 1 and 2 and stays as-is — it is cheap, it already passes, and CI runs it
+   before the browser step so a broken traffic curve fails in seconds instead of
+   burning Actions minutes. **Do not add to it, and do not add any other test
+   file, framework, or fixture.**
+   This does NOT excuse the live verification runs. Tasks 3, 4 and 5 must still
+   drive the real app against a running dev server and report what actually
+   happened. That is not a test suite; it is the only proof the selectors work
+   before CI runs headless.
 8. **TypeScript, strict mode, no `any`.** Run `npx tsc --noEmit` inside `bot/`
    before reporting done.
 9. **No secrets in the repo.** The app URL comes from an environment variable
@@ -370,20 +378,23 @@ Flow:
 8. Exit 1 if `failed / total > MAX_FAILURE_RATE`, otherwise exit 0. A run with
    zero planned sessions is a success, not a failure.
 
-Extend `bot/selftest.ts` with checks on the pure planning logic. Export the
-planning function separately from the browser code so it can be tested without
-Playwright:
-- a dry-run plan for a known peak timestamp has the expected total
-- no persona appears twice in one plan
-- over 2,000 generated slots the new-visitor share is within 5 percentage points
-  of `NEW_VISITOR_RATE`
-- every persona chosen for a region actually belongs to that region
-- `BOT_SESSIONS` override is respected
-- a dead-hours timestamp yields a plan with very few or zero sessions
+**Do not add tests.** Still export the planning function separately from the
+browser code — that separation is what makes `BOT_DRY_RUN` possible and keeps
+`run.ts` readable, not a testing concern.
 
-Verification: `npm run selftest` and `npm run typecheck` pass. Then, against a
-running dev server, run `BOT_SESSIONS=4 npm run run` and report the summary
-output verbatim, including any failures.
+Verification, all against a running dev server, reported verbatim:
+1. `npm run typecheck` passes.
+2. `BOT_DRY_RUN=true BOT_NOW=<a known peak UTC timestamp> npm run run` — paste
+   the printed plan. Confirm by eye: no persona appears twice, every persona
+   sits in the region it was picked for, and the total matches what the traffic
+   curve implies for that hour.
+3. `BOT_DRY_RUN=true BOT_NOW=<a dead-hours UTC timestamp> npm run run` — confirm
+   the plan is near-empty.
+4. `BOT_DRY_RUN=true BOT_SESSIONS=25 npm run run` — confirm the override is
+   honoured and the new-visitor slots are roughly `NEW_VISITOR_RATE` of the
+   total.
+5. `BOT_SESSIONS=4 npm run run` for real against the dev server — paste the
+   summary output, including any failures.
 
 ---
 

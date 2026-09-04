@@ -191,23 +191,27 @@ one.
 
 ## Testing
 
-The bot has no framework and no fixtures. It has `bot/selftest.ts`: an
-assert-based script covering the pure logic that can break silently.
+**The user has ruled that this is a throwaway test app and does not want test
+code written for it.** No framework, no fixtures, and no new test files.
 
-Required coverage:
+What exists and stays: `bot/selftest.ts`, an assert-based script written during
+Tasks 1 and 2 covering the traffic curve, the seeded PRNG, and persona/account
+consistency. It is kept rather than deleted for one practical reason — CI runs
+it before the browser step, so a broken curve fails in seconds instead of
+burning Actions minutes on a doomed run. It is not extended further.
 
-- The traffic curve produces zero sessions at a region's dead hours and peak
-  sessions at its peak hours.
-- Weekend scaling is applied.
-- The seeded PRNG is deterministic: the same persona yields identical seed data
-  across two calls.
-- Persona and account references are consistent: every persona's `accountId`
-  resolves to a real account.
-- Every persona id is unique, and every id is a valid UUID.
-- The session plan honours the new-visitor rate and the requested count.
+Correctness of the browser-facing code is established by **live verification
+runs**, not tests. Tasks 3, 4 and 5 each drive the real app against a running
+dev server and report what actually happened:
 
-`selftest.ts` runs in CI before the browser step, so a broken curve fails fast
-and cheap.
+| Task | What must be proven live |
+|---|---|
+| 3 | A seeded persona lands logged in, with transactions, insights and goals rendering |
+| 4 | Every one of the 19 actions executes against the real UI, with abandonment both off and on |
+| 5 | Dry-run plans at peak and dead hours look right, and a real 4-session run completes |
+
+This is deliberate. Selector code cannot be meaningfully unit-tested; the only
+proof that a selector works is clicking it in a real browser.
 
 ## Documentation
 
