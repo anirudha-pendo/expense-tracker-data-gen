@@ -11,8 +11,17 @@ import {
   BASE_SESSIONS_PER_RUN,
   sessionsForRegion,
   makeRng,
+  SEED_ANCHOR_DATE,
   type Region,
 } from "./config";
+import {
+  ARCHETYPES,
+  ACTION_WEIGHTS,
+  ACCOUNTS,
+  PERSONAS,
+  buildSeedData,
+  type Archetype,
+} from "./personas";
 
 let checksPassed = 0;
 
@@ -125,6 +134,134 @@ check("int(min, max) stays in bounds and reaches both ends over 1000 draws", () 
 
   assert.ok(sawMin, `int(${min}, ${max}) never returned ${min} over 1000 draws`);
   assert.ok(sawMax, `int(${min}, ${max}) never returned ${max} over 1000 draws`);
+});
+
+// --- Personas, accounts and archetypes ---------------------------------------
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+check("all 40 persona ids are unique and match a UUID v4 regex", () => {
+  assert.strictEqual(PERSONAS.length, 40, `expected 40 personas, got ${PERSONAS.length}`);
+  const seen = new Set<string>();
+  for (const persona of PERSONAS) {
+    assert.match(persona.id, UUID_V4_REGEX, `${persona.id} is not a UUID v4`);
+    assert.ok(!seen.has(persona.id), `duplicate persona id ${persona.id}`);
+    seen.add(persona.id);
+  }
+});
+
+check("every persona.accountId resolves to an entry in ACCOUNTS", () => {
+  const accountIds = new Set(ACCOUNTS.map((a) => a.id));
+  for (const persona of PERSONAS) {
+    assert.ok(
+      accountIds.has(persona.accountId),
+      `persona ${persona.username} has unknown accountId ${persona.accountId}`,
+    );
+  }
+});
+
+check("every account has at least one persona, and large accounts have at least 6", () => {
+  const countByAccount = new Map<string, number>();
+  for (const persona of PERSONAS) {
+    countByAccount.set(persona.accountId, (countByAccount.get(persona.accountId) ?? 0) + 1);
+  }
+  for (const account of ACCOUNTS) {
+    const count = countByAccount.get(account.id) ?? 0;
+    assert.ok(count >= 1, `account ${account.id} has no personas`);
+    if (account.size === "large") {
+      assert.ok(count >= 6, `large account ${account.id} has only ${count} personas`);
+    }
+  }
+});
+
+check("buildSeedData on the same persona twice yields deeply equal output", () => {
+  for (const persona of PERSONAS) {
+    const first = buildSeedData(persona);
+    const second = buildSeedData(persona);
+    assert.deepStrictEqual(first, second, `${persona.username}: buildSeedData is not deterministic`);
+  }
+});
+
+check("buildSeedData on two different personas yields different user ids", () => {
+  const userIds = new Set<string>();
+  for (const persona of PERSONAS) {
+    userIds.add(buildSeedData(persona).user.id);
+  }
+  assert.strictEqual(
+    userIds.size,
+    PERSONAS.length,
+    "buildSeedData produced duplicate user ids across distinct personas",
+  );
+});
+
+check(
+  "every transaction's categoryId resolves to one of the workspace's own categories, and every budget's categoryId does too",
+  () => {
+    for (const persona of PERSONAS) {
+      const seed = buildSeedData(persona);
+      const categoryIds = new Set(seed.categories.map((c) => c.id));
+      for (const tx of seed.transactions) {
+        assert.ok(
+          categoryIds.has(tx.categoryId),
+          `${persona.username}: transaction ${tx.id} references unknown category ${tx.categoryId}`,
+        );
+      }
+      for (const budget of seed.budgets) {
+        assert.ok(
+          categoryIds.has(budget.categoryId),
+          `${persona.username}: budget ${budget.id} references unknown category ${budget.categoryId}`,
+        );
+      }
+    }
+  },
+);
+
+/** "Year-month" as a single increasing integer — mirrors the helper in personas.ts, kept local so this test doesn't depend on an internal export. */
+function ymFromDate(date: Date): number {
+  return date.getUTCFullYear() * 12 + date.getUTCMonth();
+}
+
+function dateOnlyFromYm(ym: number, day: number): string {
+  const year = Math.floor(ym / 12);
+  const month = ym - year * 12;
+  return new Date(Date.UTC(year, month, day, 0, 0, 0, 0)).toISOString().slice(0, 10);
+}
+
+check("transaction dates all fall inside the archetype's history window", () => {
+  const anchor = new Date(SEED_ANCHOR_DATE);
+  const anchorYm = ymFromDate(anchor);
+  const windowEnd = anchor.toISOString().slice(0, 10);
+
+  for (const persona of PERSONAS) {
+    const { historyMonths } = ARCHETYPES[persona.archetype];
+    const earliestYm = anchorYm - (historyMonths - 1);
+    const windowStart = dateOnlyFromYm(earliestYm, 1);
+    const seed = buildSeedData(persona);
+    for (const tx of seed.transactions) {
+      assert.ok(
+        tx.date >= windowStart && tx.date <= windowEnd,
+        `${persona.username}: transaction date ${tx.date} outside history window [${windowStart}, ${windowEnd}]`,
+      );
+    }
+  }
+});
+
+check("every archetype in the table is present in ACTION_WEIGHTS, and every weight is non-negative", () => {
+  const archetypes = Object.keys(ARCHETYPES) as Archetype[];
+  for (const archetype of archetypes) {
+    const weights = ACTION_WEIGHTS[archetype];
+    assert.ok(weights, `archetype ${archetype} is missing from ACTION_WEIGHTS`);
+    for (const [action, weight] of Object.entries(weights)) {
+      assert.ok(weight >= 0, `${archetype}.${action} has a negative weight (${weight})`);
+    }
+  }
+});
+
+check("every archetype gives signOut a non-zero (but small) weight", () => {
+  for (const archetype of Object.keys(ARCHETYPES) as Archetype[]) {
+    const weights = ACTION_WEIGHTS[archetype];
+    assert.ok(weights.signOut > 0, `${archetype}.signOut should be non-zero`);
+  }
 });
 
 // --- Summary -----------------------------------------------------------------
