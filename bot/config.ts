@@ -156,3 +156,13 @@ export function makeRng(seed: string): Rng {
 // price/description tables in `seed-data.ts`, which nobody tunes.
 export const BUDGET_HEADROOM_MIN = 0.8;
 export const BUDGET_HEADROOM_MAX = 1.4;
+
+// --- Seeding --------------------------------------------------------------
+//
+// After IndexedDB is seeded and the page is reloaded, the app re-renders
+// /sign-in first and only redirects to the dashboard once its session
+// bootstrap (reading localStorage, then IndexedDB) resolves. This bounds how
+// long seedPersona waits for that redirect to settle and the dashboard's
+// data to actually render, rather than assuming the first navigation is the
+// final one.
+export const SEED_LANDMARK_TIMEOUT_MS = 30000;
