@@ -19,7 +19,11 @@ export const BASE_SESSIONS_PER_RUN = 8; // per region, before curve weighting
 export const NEW_VISITOR_RATE = 0.15;
 export const WEEKEND_MULTIPLIER = 0.25;
 export const MAX_FAILURE_RATE = 0.5; // exit non-zero above this
-export const SESSION_TIMEOUT_MS = 240000;
+// A 25-action power session (~2s think time + ~3s/action, plus readInsights
+// dwells of 5-36s) can plausibly exceed 240s on a slow shared CI runner, and
+// a session killed by its own timeout counts as a failure. Six minutes still
+// sits well inside the 20-minute job ceiling at MAX_CONCURRENCY 6.
+export const SESSION_TIMEOUT_MS = 360000;
 
 // --- Pacing -------------------------------------------------------------
 
@@ -340,6 +344,16 @@ export const SCREENSHOT_TIMEOUT_MS = 15000;
  * see NEW_VISITOR_WALK_MIN/MAX.
  */
 export const NEW_VISITOR_ARCHETYPE: Archetype = "explorer";
+
+/**
+ * The abandon rate a new-visitor session uses instead of borrowing
+ * `explorer`'s 0.45. Applied per multi-step action across a short walk,
+ * 0.45 compounds to almost no completed flows, starving the
+ * signup-to-first-transaction funnel of the completions that make its
+ * drop-off readable. `explorer` itself is untouched — this only changes what
+ * new-visitor sessions use.
+ */
+export const NEW_VISITOR_ABANDON_RATE = 0.3;
 
 /**
  * How many actions a new visitor takes after finishing sign-up and workspace

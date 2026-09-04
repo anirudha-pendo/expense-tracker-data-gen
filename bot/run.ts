@@ -40,6 +40,7 @@ import {
   MAX_CONCURRENCY,
   MAX_FAILURE_RATE,
   NAV_LANDMARK_TIMEOUT_MS,
+  NEW_VISITOR_ABANDON_RATE,
   NEW_VISITOR_ACTIONS,
   NEW_VISITOR_ARCHETYPE,
   NEW_VISITOR_CURRENCY_CHANGE_RATE,
@@ -574,7 +575,13 @@ async function runOneSession(
   const ctx: SessionCtx = {
     persona: planned.persona,
     rng,
-    abandonRate: ARCHETYPES[planned.persona.archetype].abandonRate,
+    // A new visitor uses its own dedicated abandon rate rather than the
+    // explorer archetype it otherwise borrows action weights from — see
+    // NEW_VISITOR_ABANDON_RATE's comment in config.ts.
+    abandonRate:
+      planned.kind === "new-visitor"
+        ? NEW_VISITOR_ABANDON_RATE
+        : ARCHETYPES[planned.persona.archetype].abandonRate,
     log,
   };
 
