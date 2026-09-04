@@ -9,7 +9,6 @@ import { GoalsPage } from "@/features/goals/pages/goals-page";
 import { InsightsPage } from "@/features/insights/pages/insights-page";
 import { SettingsPage } from "@/features/settings/pages/settings-page";
 import { ProtectedRoute } from "@/shared/components/protected-route";
-import { BotPage } from "@/features/bot/pages/bot-page";
 
 function GuestGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, hasWorkspace, isLoading } = useAuthContext();
@@ -98,7 +97,6 @@ export function AppRouter() {
             </ProtectedRoute>
           }
         />
-        <Route path="/bot" element={<BotPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
