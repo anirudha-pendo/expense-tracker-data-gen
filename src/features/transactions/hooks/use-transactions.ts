@@ -74,6 +74,7 @@ export function useTransactions(workspaceId: string): UseTransactionsReturn {
   }, [workspaceId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload();
   }, [reload]);
 

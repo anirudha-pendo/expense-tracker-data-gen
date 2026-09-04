@@ -57,6 +57,7 @@ export function useAttachments(workspaceId: string, transactionId: string | null
   }, [transactionId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload();
   }, [reload]);
 
