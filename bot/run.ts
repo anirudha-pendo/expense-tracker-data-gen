@@ -8,8 +8,11 @@
 //      concurrency pool bounded by MAX_CONCURRENCY.
 //   3. Drives each session in its own BrowserContext — a seeded returning
 //      persona, or a brand-new visitor signing up through the real UI.
-//   4. Prints a summary and exits 1 only if the failure rate exceeds
-//      MAX_FAILURE_RATE.
+//   4. Prints a summary and exits 1 if the SESSION failure rate exceeds
+//      MAX_FAILURE_RATE, or the ACTION failure rate exceeds
+//      MAX_ACTION_FAILURE_RATE, or a non-empty plan completed no action at
+//      all. The last two are what catch a run where every selector broke and
+//      every session still "succeeded".
 //
 // Environment contract (Task 6's workflow depends on exactly these):
 //   APP_URL       where the app is served (default http://localhost:5173)
@@ -23,7 +26,12 @@
 //   - `preparePage` runs on every page before its first navigation.
 //   - A failed action does NOT end the session: it is counted, the UI is
 //     reset, and the walk continues. Session length is analytics data.
-//   - `signOut` is terminal — everything else needs an authenticated session.
+//   - `signOut` is terminal — everything else needs an authenticated session
+//     — so it is held back until SIGN_OUT_MIN_WALK_FRACTION of the planned
+//     walk is behind us.
+//   - `showUpRate` is a probability GATE applied before the weighted draw,
+//     once per persona per UTC day by default (SHOW_UP_GATE_PERIOD). As a
+//     mere weight inside the draw it did nothing and retention ran flat.
 //   - `clearFilters` logging `skipped:` is neither a failure nor a feature
 //     use.
 //   - A failed session never aborts the run, and its context is always
@@ -37,6 +45,7 @@ import {
   APP_URL,
   FAILURE_DIR,
   HEADLESS,
+  MAX_ACTION_FAILURE_RATE,
   MAX_CONCURRENCY,
   MAX_FAILURE_RATE,
   NAV_LANDMARK_TIMEOUT_MS,
@@ -54,7 +63,10 @@ import {
   SCREENSHOT_TIMEOUT_MS,
   SEED_LANDMARK_TIMEOUT_MS,
   SESSION_TIMEOUT_MS,
+  SHOW_UP_GATE_PERIOD,
+  SHOW_UP_SHORTFALL,
   SIGNUP_USERNAME_MAX_LEN,
+  SIGN_OUT_MIN_WALK_FRACTION,
   USER_AGENTS,
   VIEWPORTS,
   makeRng,
@@ -107,6 +119,13 @@ export interface PlannedSession {
 export interface SessionPlan {
   now: Date;
   total: number;
+  /**
+   * Slots the traffic curve (or BOT_SESSIONS) asked for, before the show-up
+   * gate. Reported alongside `perRegion` so the gate's effect is visible
+   * rather than looking like the curve quietly changed.
+   */
+  requestedPerRegion: Record<Region, number>;
+  /** Slots actually planned, after the show-up gate. Always <= `requestedPerRegion`. */
   perRegion: Record<Region, number>;
   sessions: PlannedSession[];
 }
@@ -172,50 +191,77 @@ function newVisitorPersona(rng: Rng, region: Region, stamp: string, index: numbe
 }
 
 /**
+ * The show-up gate: does this persona turn up at all right now?
+ *
+ * An independent probability check, run BEFORE the weighted draw that fills a
+ * slot — not a weight inside it. As a weight, `showUpRate` could not gate
+ * anything: the draw had to fill every slot from a 12-15 persona regional
+ * pool, so a `churning` persona with a stated 8% rate came out active on 36%
+ * of days and the day-0 retention cohort ran flat for a month.
+ *
+ * See SHOW_UP_GATE_PERIOD for why the default rolls once per UTC day, off a
+ * date-keyed seed rather than the plan's PRNG.
+ */
+function showsUp(persona: Persona, now: Date, planRng: Rng): boolean {
+  const rate = ARCHETYPES[persona.archetype].showUpRate;
+  if (SHOW_UP_GATE_PERIOD === "run") return planRng.chance(rate);
+  return makeRng(`showup:${now.toISOString().slice(0, 10)}:${persona.id}`).chance(rate);
+}
+
+/**
  * Builds the whole run's session plan. Pure: no browser, no I/O, no clock of
  * its own — everything comes from `now` and the seeded PRNG (bar the
  * collision-proofing stamp explained above). That is what lets BOT_DRY_RUN
  * print exactly what a real run would do.
  *
- * `totalOverride` is BOT_SESSIONS: an absolute total, split across the
- * regions in the same proportion the hour's curve gives them.
+ * `totalOverride` is BOT_SESSIONS: a total, split across the regions in the
+ * same proportion the hour's curve gives them. It is a CEILING, not an exact
+ * count — the show-up gate below can leave a region short of personas, and
+ * with SHOW_UP_SHORTFALL at its "plan-fewer" default those slots go unplanned.
  */
 export function buildPlan(now: Date, totalOverride: number | null = null): SessionPlan {
   const rng = makeRng(`plan:${now.toISOString()}`);
   const stamp = Date.now().toString(36);
   const hour = now.getUTCHours();
 
-  const perRegion = {} as Record<Region, number>;
+  const requestedPerRegion = {} as Record<Region, number>;
   if (totalOverride === null) {
     const curveCounts = sessionsForHour(now);
-    for (const region of REGIONS) perRegion[region] = curveCounts[region];
+    for (const region of REGIONS) requestedPerRegion[region] = curveCounts[region];
   } else {
     const shares = apportion(
       totalOverride,
       REGIONS.map((region) => REGION_CURVE[region][hour]),
     );
     REGIONS.forEach((region, i) => {
-      perRegion[region] = shares[i];
+      requestedPerRegion[region] = shares[i];
     });
   }
 
+  const perRegion = {} as Record<Region, number>;
   const sessions: PlannedSession[] = [];
-  // No persona is used twice in one run: a single visitor logging in twice in
-  // the same minute from two browsers is not behaviour worth manufacturing.
-  const usedPersonaIds = new Set<string>();
 
   for (const region of REGIONS) {
-    for (let slot = 0; slot < perRegion[region]; slot++) {
+    // Only the personas who actually turned up are eligible for a slot. The
+    // roll happens once per persona (see `showsUp`), never once per slot — a
+    // per-slot roll would hand a `churning` persona eight chances in an
+    // eight-slot hour and flatten the retention curve all over again.
+    //
+    // A persona is still never used twice in one run: it leaves `showingUp`
+    // the moment it is drawn. A single visitor logging in twice in the same
+    // minute from two browsers is not behaviour worth manufacturing.
+    const showingUp = PERSONAS.filter(
+      (persona) => persona.region === region && showsUp(persona, now, rng),
+    );
+
+    let planned = 0;
+    for (let slot = 0; slot < requestedPerRegion[region]; slot++) {
       const index = sessions.length + 1;
       const seed = `session:${now.toISOString()}:${index}`;
-      const candidates = PERSONAS.filter(
-        (persona) => persona.region === region && !usedPersonaIds.has(persona.id),
-      );
-      // `chance` is drawn first either way, so exhausting a region's pool
-      // (only reachable via a large BOT_SESSIONS) does not shift the PRNG
-      // stream for the slots after it.
+      // `chance` is drawn first either way, so a region whose gated pool runs
+      // dry does not shift the PRNG stream for the slots after it.
       const drewNewVisitor = rng.chance(NEW_VISITOR_RATE);
-      if (drewNewVisitor || candidates.length === 0) {
+      if (drewNewVisitor || (showingUp.length === 0 && SHOW_UP_SHORTFALL === "new-visitor")) {
         sessions.push({
           index,
           region,
@@ -223,15 +269,25 @@ export function buildPlan(now: Date, totalOverride: number | null = null): Sessi
           persona: newVisitorPersona(rng, region, stamp, index),
           seed,
         });
+        planned += 1;
         continue;
       }
-      const persona = rng.weighted(candidates, (p) => ARCHETYPES[p.archetype].showUpRate);
-      usedPersonaIds.add(persona.id);
+      if (showingUp.length === 0) {
+        // SHOW_UP_SHORTFALL === "plan-fewer": nobody left who showed up, so
+        // this slot is simply not run. Fewer people turned up this hour.
+        continue;
+      }
+      // Weighted among the survivors, so a power user is still likelier than
+      // a casual one to be the member of the pool who actually gets the slot.
+      const persona = rng.weighted(showingUp, (p) => ARCHETYPES[p.archetype].showUpRate);
+      showingUp.splice(showingUp.indexOf(persona), 1);
       sessions.push({ index, region, kind: "returning", persona, seed });
+      planned += 1;
     }
+    perRegion[region] = planned;
   }
 
-  return { now, total: sessions.length, perRegion, sessions };
+  return { now, total: sessions.length, requestedPerRegion, perRegion, sessions };
 }
 
 // =============================================================================
@@ -265,16 +321,25 @@ function perRegionSummary(perRegion: Record<Region, number>): string {
   return REGIONS.map((region) => `${region} ${perRegion[region]}`).join(", ");
 }
 
+/** Total slots asked for across all regions, before the show-up gate. */
+function requestedTotal(plan: SessionPlan): number {
+  return REGIONS.reduce((acc, region) => acc + plan.requestedPerRegion[region], 0);
+}
+
 function formatPlan(plan: SessionPlan, totalOverride: number | null): string {
   const newVisitors = plan.sessions.filter((s) => s.kind === "new-visitor").length;
   const share = plan.total === 0 ? 0 : (newVisitors / plan.total) * 100;
+  const requested = requestedTotal(plan);
   const lines = [
     "=== usage bot — DRY RUN (no browser launched) ===",
     `clock          ${describeClock(plan.now)}`,
     `app            ${APP_URL}`,
-    `planned        ${plan.total} session(s) — ${perRegionSummary(plan.perRegion)}`,
+    `requested      ${requested} slot(s) — ${perRegionSummary(plan.requestedPerRegion)}`,
+    `planned        ${plan.total} session(s) — ${perRegionSummary(plan.perRegion)}` +
+      ` (${requested - plan.total} dropped by the show-up gate)`,
     `new visitors   ${newVisitors} (${share.toFixed(0)}% of planned, target ${(NEW_VISITOR_RATE * 100).toFixed(0)}%)`,
     `count from     ${totalOverride === null ? "the traffic curve" : `BOT_SESSIONS=${totalOverride}`}`,
+    `shortfall      SHOW_UP_SHORTFALL=${SHOW_UP_SHORTFALL}`,
     "",
   ];
   if (plan.total > 0) {
@@ -386,8 +451,18 @@ async function driveWalk(
   pool: Action[],
   steps: number,
 ): Promise<void> {
+  // `signOut` is terminal, so drawing it early does not just add an action —
+  // it deletes the rest of the walk. Holding it back until most of the planned
+  // length is behind us keeps sign-outs happening (they are real behaviour and
+  // real analytics data) while stopping a 25-step power session from ending at
+  // step 2. See SIGN_OUT_MIN_WALK_FRACTION.
+  const signOutFromStep = Math.floor(steps * SIGN_OUT_MIN_WALK_FRACTION);
   for (let step = 0; step < steps; step++) {
-    const available = pool.filter((action) => action.weight(ctx) > 0);
+    const signOutAllowed = step >= signOutFromStep;
+    const available = pool.filter(
+      (action) =>
+        action.weight(ctx) > 0 && (signOutAllowed || action.name !== "signOut"),
+    );
     if (available.length === 0) {
       ctx.log("walk ended: no action is available to this persona");
       return;
@@ -712,6 +787,7 @@ function printSummary(plan: SessionPlan, outcomes: SessionOutcome[], wallClockMs
     "=== usage bot — run summary ===",
     `clock             ${describeClock(plan.now)}`,
     `app               ${APP_URL}`,
+    `requested         ${requestedTotal(plan)} — ${perRegionSummary(plan.requestedPerRegion)}`,
     `planned           ${plan.total} — ${perRegionSummary(plan.perRegion)}`,
     `succeeded         ${succeeded}`,
     `failed            ${failed}`,
@@ -776,7 +852,34 @@ const BOT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // Entry point
 // =============================================================================
 
+/**
+ * Refuses to start on an APP_URL that is not a usable http(s) address.
+ *
+ * Without this, a misconfigured URL is discovered once per session, deep
+ * inside Playwright, as up to eighteen near-identical navigation errors and a
+ * failure-rate exit. Checking it once up front costs nothing and says exactly
+ * what is wrong. Note that an UNSET `vars.APP_URL` arrives as "" and is
+ * handled in config.ts by falling back to localhost — this catches the other
+ * case, a value that is set but wrong.
+ */
+function assertAppUrlUsable(): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(APP_URL);
+  } catch {
+    throw new Error(
+      `APP_URL is not a valid URL: "${APP_URL}". Set the APP_URL repository variable (or the APP_URL environment variable) to the full address of the deployed app, e.g. https://example.vercel.app`,
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `APP_URL must be an http(s) URL, got "${APP_URL}" (protocol "${parsed.protocol}")`,
+    );
+  }
+}
+
 async function main(): Promise<number> {
+  assertAppUrlUsable();
   const now = readNow();
   const totalOverride = readSessionsOverride();
   const plan = buildPlan(now, totalOverride);
@@ -799,6 +902,7 @@ async function main(): Promise<number> {
       "=== usage bot ===",
       `clock       ${describeClock(now)}`,
       `app         ${APP_URL}`,
+      `requested   ${requestedTotal(plan)} — ${perRegionSummary(plan.requestedPerRegion)}`,
       `planned     ${plan.total} — ${perRegionSummary(plan.perRegion)}`,
       `concurrency ${Math.min(MAX_CONCURRENCY, plan.total)}`,
       `headless    ${HEADLESS}`,
@@ -826,15 +930,50 @@ async function main(): Promise<number> {
     );
     return 1;
   }
+
+  // The session failure rate above cannot see a run in which every session
+  // seeded fine, walked its steps, failed every single action and reported
+  // success — which is exactly what an app redesign that broke the selectors
+  // would produce. These two checks are the ones that say "the bot has stopped
+  // producing data".
+  const totals = outcomes.reduce(
+    (acc, outcome) => ({
+      actions: acc.actions + outcome.counters.actions,
+      skips: acc.skips + outcome.counters.skips,
+      actionFailures: acc.actionFailures + outcome.counters.actionFailures,
+    }),
+    { actions: 0, skips: 0, actionFailures: 0 },
+  );
+  const attempted = totals.actions + totals.skips + totals.actionFailures;
+  if (totals.actions === 0) {
+    console.log(
+      `\n${plan.total} session(s) ran and not one action completed — the bot is producing no data, exiting 1`,
+    );
+    return 1;
+  }
+  const actionFailureRate = attempted === 0 ? 0 : totals.actionFailures / attempted;
+  if (actionFailureRate > MAX_ACTION_FAILURE_RATE) {
+    console.log(
+      `\naction failure rate ${(actionFailureRate * 100).toFixed(0)}% ` +
+        `(${totals.actionFailures} of ${attempted} attempted) exceeds MAX_ACTION_FAILURE_RATE ` +
+        `${(MAX_ACTION_FAILURE_RATE * 100).toFixed(0)}% — exiting 1`,
+    );
+    return 1;
+  }
   return 0;
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((err: unknown) => {
-    console.error(`usage bot could not run: ${firstLine(err)}`);
-    console.error(fullError(err));
-    process.exitCode = 1;
-  });
+// Only run when this file IS the process entry point. Importing it (the
+// exported `buildPlan` is browser-free and worth reusing) must not launch
+// Chromium and drive a full run as a side effect of the import.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((err: unknown) => {
+      console.error(`usage bot could not run: ${firstLine(err)}`);
+      console.error(fullError(err));
+      process.exitCode = 1;
+    });
+}

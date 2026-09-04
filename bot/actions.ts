@@ -519,7 +519,16 @@ function amountFor(ctx: SessionCtx, categoryName: string): string {
 // NOT survive intact, so the bot cannot expect the toast to name the string it
 // typed. Mirroring that one rule here is what makes the expected toast text
 // exact — checked against the app's own `parseQuickAdd` over all 87 pooled
-// descriptions. Keep in lockstep with src/features/quick-add/lib/parser.ts.
+// descriptions.
+//
+// MIRRORED RULE — keep in lockstep with the reserved-word stripping in
+// `src/features/quick-add/lib/parser.ts` (the TYPE_KEYWORDS/token filter
+// around lines 126-135). If that parser ever changes which tokens it strips,
+// or stops stripping them, this list and `parsedDescription` below go stale
+// silently: nothing here imports from src/ (separate tsconfig, separate module
+// graph) and `tsc --noEmit` cannot see the drift. The symptom would be
+// `useQuickAdd` failing its toast assertion on a handful of descriptions.
+// If you are editing that parser, edit this too.
 const QUICK_ADD_TYPE_KEYWORDS = ["income", "expense"];
 
 function parsedDescription(typed: string): string {

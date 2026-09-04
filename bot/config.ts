@@ -9,7 +9,13 @@ import type { ActionName, Archetype } from "./personas";
 
 // --- Environment-driven basics -------------------------------------------
 
-export const APP_URL: string = process.env.APP_URL ?? "http://localhost:5173";
+// `||`, deliberately NOT `??`. GitHub Actions renders an unset repository
+// variable as the EMPTY STRING, not as undefined — `APP_URL: ${{ vars.APP_URL }}`
+// with no variable set passes `""`, which `??` happily accepts, leaving the
+// bot driving an empty URL. `||` treats "" as absent, which is what an unset
+// variable means. run.ts additionally refuses to start on a URL that will not
+// parse, so a typo fails in seconds instead of once per session.
+export const APP_URL: string = process.env.APP_URL || "http://localhost:5173";
 export const HEADLESS: boolean = process.env.HEADLESS !== "false";
 
 // --- Run shape --------------------------------------------------------------
@@ -19,11 +25,83 @@ export const BASE_SESSIONS_PER_RUN = 8; // per region, before curve weighting
 export const NEW_VISITOR_RATE = 0.15;
 export const WEEKEND_MULTIPLIER = 0.25;
 export const MAX_FAILURE_RATE = 0.5; // exit non-zero above this
+
+/**
+ * The other half of the exit code, and the only signal that says "the bot has
+ * stopped producing data".
+ *
+ * A session is `ok` whenever it does not throw, and `runStep` swallows every
+ * action error by design (a failed action must not truncate the walk, because
+ * session length is itself analytics data). Without this threshold an app
+ * redesign that broke every selector would have each session seed fine, walk
+ * its steps, fail all of them and report success — eight green runs a day,
+ * indefinitely, producing nothing.
+ *
+ * Measured against attempted actions (completed + skipped + failed) across the
+ * whole run, so one pathological session cannot trip it on its own. 0.3 sits
+ * far above anything a healthy run produces (live runs measure 0) and far
+ * below the ~1.0 a broken-selector run would.
+ */
+export const MAX_ACTION_FAILURE_RATE = 0.3;
+
 // A 25-action power session (~2s think time + ~3s/action, plus readInsights
 // dwells of 5-36s) can plausibly exceed 240s on a slow shared CI runner, and
 // a session killed by its own timeout counts as a failure. Six minutes still
 // sits well inside the 20-minute job ceiling at MAX_CONCURRENCY 6.
 export const SESSION_TIMEOUT_MS = 360000;
+
+// --- The show-up gate -------------------------------------------------------
+//
+// `ARCHETYPES[x].showUpRate` is defined by the spec as "chance of appearing in
+// an hour their region is active", and `churning`'s low rate is what the spec
+// says "makes retention curves bend instead of running flat". For that to be
+// true it has to be an independent probability GATE, not — as it was — a
+// relative weight inside a draw that is forced to fill every slot from a
+// 12-15 persona regional pool. As a weight it did almost nothing: a
+// `churning` persona with a stated 8% rate was measured active on 36% of
+// days, and the day-0 cohort ran flat at 85-91% for a month.
+//
+// `buildPlan` therefore rolls each persona's `showUpRate` ONCE (see
+// SHOW_UP_GATE_PERIOD for how often "once" is) and only the survivors go into
+// the weighted draw that fills the slots.
+
+/**
+ * How often a persona rolls its `showUpRate`.
+ *
+ * `"day"` (the default): once per UTC day, seeded on the persona's id and the
+ * date, so all of that day's runs agree. This is the setting that makes the
+ * archetype table mean what it says. The workflow fires EIGHT times a day, and
+ * a per-run roll compounds — a stated 8% becomes `1 - 0.92^8` = 49% of days,
+ * which is how the original weight-based draw ended up with `churning` active
+ * on 36% of days and the day-0 cohort running flat at 85-91%. Seeding on the
+ * date rather than the plan's PRNG is not a stylistic choice: the eight daily
+ * runs are eight separate processes on eight separate runners with no shared
+ * state, so a date-keyed seed is the only way they can agree on who is around
+ * today.
+ *
+ * `"run"`: rolls per run off the plan's own PRNG, the literal reading of the
+ * spec's "chance of appearing in an hour their region is active". Correct if
+ * the cron schedule is ever cut back to roughly one run a day; at eight runs a
+ * day it barely gates at all.
+ */
+export const SHOW_UP_GATE_PERIOD: "day" | "run" = "day";
+
+/**
+ * What happens when a region's gated pool runs out before its planned slots
+ * are filled.
+ *
+ * `"plan-fewer"` (the default): the slot simply is not planned. Fewer people
+ * showed up, so there was less traffic — which is the honest reading of the
+ * gate, and it keeps the new-vs-returning mix at NEW_VISITOR_RATE. It also
+ * means BOT_SESSIONS is a ceiling rather than an exact count.
+ *
+ * `"new-visitor"`: the slot is filled by a brand-new visitor signing up
+ * instead. Holds volume (and BOT_SESSIONS) exactly, at the cost of pushing the
+ * new-visitor share well above NEW_VISITOR_RATE on any hour whose plan is
+ * bigger than the gated pool — which distorts the new-vs-returning split, and
+ * that split is itself analytics data.
+ */
+export const SHOW_UP_SHORTFALL: "plan-fewer" | "new-visitor" = "plan-fewer";
 
 // --- Pacing -------------------------------------------------------------
 
@@ -267,6 +345,24 @@ export const INSIGHTS_DWELL_PAUSES_MAX = 4;
 export const INSIGHTS_SCROLL_RATE = 0.7;
 export const INSIGHTS_SCROLL_PX_MIN = 200;
 export const INSIGHTS_SCROLL_PX_MAX = 900;
+
+// --- Signing out -------------------------------------------------------------
+//
+// `signOut` is terminal (every other action needs an authenticated session),
+// and it carries a non-zero weight at every step. Left unconstrained, a power
+// session planning 12-25 steps had a 39% chance of ending early and averaged
+// 14.8 actual steps against a planned mid of 18.5 — which contradicts the
+// standing ruling that session length is itself analytics data the bot is
+// trying to make realistic.
+
+/**
+ * The fraction of a walk's planned length that must be behind it before
+ * `signOut` can be drawn at all. At 0.75 a 20-step walk can only sign out from
+ * step 15 onwards, so sign-outs keep happening (and keep ending sessions the
+ * way a real one ends) without landing at step 2 of 25. Set to 0 to restore
+ * the old behaviour; set to 1 to allow it only as the very last step.
+ */
+export const SIGN_OUT_MIN_WALK_FRACTION = 0.75;
 
 // --- Recovering from a failed action ----------------------------------------
 //

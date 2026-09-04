@@ -41,8 +41,9 @@ Do these in order.
    BOT_SESSIONS=3 HEADLESS=false npm run run
    ```
 
-   `BOT_SESSIONS=3` runs exactly 3 sessions instead of however many the
-   traffic curve would plan for the current hour. `HEADLESS=false` opens a
+   `BOT_SESSIONS=3` runs up to 3 sessions instead of however many the
+   traffic curve would plan for the current hour (up to, because the show-up
+   gate can leave a slot with nobody to fill it). `HEADLESS=false` opens a
    visible Chromium window per session instead of running invisibly.
 
 All four steps above were run against a live dev server while writing this
@@ -63,7 +64,7 @@ These control one run. Set them before `npm run run`.
 | `APP_URL` | The URL of the app to drive. | `http://localhost:5173` |
 | `HEADLESS` | Set to the exact string `false` to see the browser. Any other value (including leaving it unset) keeps it headless. | headless (true) |
 | `BOT_NOW` | An ISO timestamp. Overrides "now" for planning, so you can test what a specific hour/day would plan. Must parse as a valid date, or the bot exits with an error. | the real current time |
-| `BOT_SESSIONS` | A whole number, 0 or more. Overrides the total session count for this run — normally the traffic curve decides that. Sessions are still split across `IN`/`EU`/`US` in the same proportions the curve gives that hour. | unset — use the traffic curve |
+| `BOT_SESSIONS` | A whole number, 0 or more. Overrides the total session count for this run — normally the traffic curve decides that. Sessions are still split across `IN`/`EU`/`US` in the same proportions the curve gives that hour. It is a **ceiling, not an exact count**: the show-up gate (below) can leave a region with nobody available, and those slots go unplanned. | unset — use the traffic curve |
 | `BOT_DRY_RUN` | Set to the exact string `true` to print the planned sessions and exit 0 without launching a browser. | unset — a real run |
 
 Note: the GitHub Actions workflow only wires up `APP_URL`, `BOT_SESSIONS` and
@@ -85,13 +86,17 @@ what they affect.
 | `WEEKEND_MULTIPLIER` (0.25) | Fraction of weekday traffic kept on Saturday/Sunday (UTC). | 0.1–0.5. 1 would mean no weekend dip at all. |
 | `NEW_VISITOR_RATE` (0.15) | Fraction of planned sessions that sign up as a brand-new visitor instead of returning as a seeded persona. | 0.05–0.3. Too high and retention charts get noisy; 0 kills the sign-up funnel entirely. |
 | `REGION_CURVE` (`IN`/`EU`/`US`, 24 values each, 0–1) | The hour-by-hour shape of each region's traffic within a day. Not a single number — see `config.ts` for all 72 values. | Each value is a fraction of that region's peak (1.0 = busiest hour). Edit individual hours to reshape a region's day. |
+| `SHOW_UP_GATE_PERIOD` (`"day"`) | How often a persona rolls its archetype's `showUpRate` — see "The show-up gate" below. | `"day"` or `"run"`. Keep `"day"` while the workflow fires 8 times a day. |
+| `SHOW_UP_SHORTFALL` (`"plan-fewer"`) | What happens when a region's planned slots outnumber the personas who turned up. `"plan-fewer"` leaves the slot unrun; `"new-visitor"` fills it with a fresh sign-up instead. | `"plan-fewer"` keeps the new-vs-returning mix honest; `"new-visitor"` holds volume at the cost of skewing it. |
 
 ### Concurrency and limits
 
 | Constant | What turning it does | Sensible range |
 |---|---|---|
 | `MAX_CONCURRENCY` (6) | How many browser contexts (sessions) run at once. | 2–6 on a standard GitHub-hosted runner (2 CPU, 7 GB RAM). Higher distorts timing, which distorts the "time on page" data the bot exists to produce. |
-| `MAX_FAILURE_RATE` (0.5) | Above this fraction of failed sessions, the whole run exits non-zero (fails the CI job). | 0.2–0.6. Too low and a couple of flaky sessions turn CI red for no reason. |
+| `MAX_FAILURE_RATE` (0.5) | Above this fraction of failed *sessions*, the whole run exits non-zero (fails the CI job). | 0.2–0.6. Too low and a couple of flaky sessions turn CI red for no reason. |
+| `MAX_ACTION_FAILURE_RATE` (0.3) | Above this fraction of failed *actions* (across the whole run), the run exits non-zero — even though every session "succeeded". This is the check that catches an app redesign that broke the selectors: without it the bot would report eight green, empty runs a day forever. A run that completes zero actions from a non-empty plan always exits 1, whatever this is set to. | 0.15–0.4. A healthy run measures 0. |
+| `SIGN_OUT_MIN_WALK_FRACTION` (0.75) | How much of a walk must be behind it before `signOut` — which ends the session — can be drawn at all. At 0 a 25-step power session had a 36% chance of ending early, averaging 14.8 steps against a planned 18.6; at 0.75 that is 10% and 18.3. | 0–1. 0 restores the old behaviour; 1 allows sign-out only as the very last step. |
 | `ROW_PICK_LIMIT` (12) | Edit/delete pick a transaction from the first this-many rows on screen, like a real user would. | 5–20. |
 | `UI_RESET_MAX_ESCAPES` (5) | How many Escape presses the recovery code spends trying to close whatever a failed action left open. | 3–8. |
 | `FILTER_COUNT_MIN` / `FILTER_COUNT_MAX` (1–2) | How many of the four transaction filters one `filterTransactions` action touches at once. | 1–4 (4 is every filter at once). |
@@ -140,6 +145,36 @@ goal/budget amount ranges, browser viewport/user-agent lists, new-visitor
 walk length). They follow the same "everything is a named constant in
 `config.ts`" rule — read the file directly if you need one of those.
 
+## The show-up gate
+
+Not every persona turns up every day, and that is the whole point.
+
+Each archetype carries a `showUpRate` — `power` 0.85, `regular` 0.55,
+`explorer` 0.40, `casual` 0.25, `churning` 0.08. Before the planner fills a
+region's slots, every persona in that region rolls that number **once**.
+Only the ones who pass can be picked; the pick among them is then weighted by
+the same rate, so a power user is still likelier to be the one who gets a
+scarce slot.
+
+Two details that matter:
+
+- **The roll happens once per UTC day, not once per run.** The workflow fires
+  eight times a day. A per-run roll compounds — a stated 8% becomes
+  `1 - 0.92^8` = 49% of days — which is how a `churning` persona ended up
+  active on 36% of days and the retention curve ran flat at 85-91% for a
+  month. The roll is seeded on the persona's id plus the date, so all eight of
+  a day's runs (eight separate processes, on eight separate runners, sharing
+  no state) independently agree on who is around today.
+- **A slot nobody can fill is not run.** See `SHOW_UP_SHORTFALL`. This is why
+  `planned` in the run summary can sit below `requested`, and why
+  `BOT_SESSIONS` is a ceiling.
+
+Measured over 28 simulated days across the 8 real cron hours, the gate moves
+days-active per archetype from 91/81/72/59/36% (power/regular/explorer/casual/
+churning) to 83/49/31/20/4%, and the averaged cohort retention curve from a
+near-flat ~78% to a genuine drop to ~52%. Total planned volume falls about
+11%.
+
 ## Triggering it remotely
 
 The workflow (`.github/workflows/usage-bot.yml`) accepts three kinds of
@@ -186,19 +221,40 @@ Needs: a personal access token (classic) with the `repo` scope, or a
 fine-grained token with `Contents: read and write` access to this repo,
 belonging to a user with write access.
 
-**Limitation:** a `repository_dispatch` call cannot set `sessions` or
-`dry_run`. The workflow only reads those from `github.event.inputs`, which is
-only populated for `workflow_dispatch` events. A `curl`-triggered run always
-uses the traffic curve for the current hour and always launches a real
-browser. If you need to override session count or dry-run remotely, use
-`gh workflow run` or the UI's Run workflow button instead.
+To set the same two knobs the Run workflow button offers, put them in
+`client_payload` — `github.event.inputs` is empty for this event type, so the
+workflow reads both places:
+
+```
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer <YOUR_TOKEN>" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/anirudha-pendo/expense-tracker-data-gen/dispatches \
+  -d '{"event_type":"run-usage-bot","client_payload":{"sessions":"5","dry_run":"true"}}'
+```
+
+Both `client_payload` keys are optional and both are strings. Omit
+`sessions` to use the traffic curve; omit `dry_run` (or send `"false"`) to
+launch a real browser.
 
 ## Required setup: `APP_URL`
 
 The workflow does nothing sensible until `APP_URL` is set as a **repository
 variable** (not a secret — it's a public URL, not something to hide).
-Without it, `APP_URL` defaults to `http://localhost:5173`, which does not
-exist on a GitHub-hosted runner, so every session will fail immediately.
+
+What actually happens when it is not set: GitHub renders an unset
+`${{ vars.APP_URL }}` as the **empty string**, not as "undefined". `config.ts`
+therefore uses `||`, not `??`, so an empty value falls back to
+`http://localhost:5173` — which does not exist on a GitHub-hosted runner, so
+every session fails immediately. (With `??` the empty string would have been
+accepted as-is and the bot would have driven an empty URL, which is worse and
+much harder to diagnose.)
+
+If `APP_URL` is set but malformed — a typo, a missing scheme, an `ftp://`
+address — `run.ts` refuses to start at all, prints what is wrong and exits 1
+in about a second, rather than producing one near-identical navigation error
+per session.
 
 Set it once:
 
@@ -217,6 +273,9 @@ To reshape traffic, edit `config.ts`:
 - `REGION_CURVE` — reshapes which hours are busy for a given region.
 - `WEEKEND_MULTIPLIER` — how much weekends dip.
 - `NEW_VISITOR_RATE` — the resulting mix of new sign-ups vs. returning users.
+- `SHOW_UP_GATE_PERIOD` / `SHOW_UP_SHORTFALL` — how much of each hour's plan
+  the show-up gate is allowed to drop (see "The show-up gate" above). This is
+  the knob that trades volume against how sharply retention curves fall.
 
 To change *how often* the whole plan runs, edit the `cron:` list in
 `.github/workflows/usage-bot.yml` (currently 8 runs/day, one per
@@ -290,7 +349,8 @@ the log:
 === usage bot — run summary ===
 clock             <ISO timestamp> (UTC hour, weekday)
 app               <APP_URL used>
-planned           <total> — IN <n>, EU <n>, US <n>
+requested         <slots the curve asked for> — IN <n>, EU <n>, US <n>
+planned           <slots actually run> — IN <n>, EU <n>, US <n>
 succeeded         <count>
 failed            <count>
 actions performed <count>
@@ -306,6 +366,11 @@ EU      ...
 US      ...
 ```
 
+`requested` is what the traffic curve (or `BOT_SESSIONS`) asked for.
+`planned` is what survived the show-up gate — `planned` below `requested`
+means fewer personas turned up that hour, which is the gate working, not a
+fault.
+
 If any session failed, a `failed sessions:` block follows, listing each
 one's index, region, persona, the page URL it was on, the error's first
 line, and the path to its screenshot (if one was captured).
@@ -319,18 +384,27 @@ The workflow's **"Upload failure artifacts"** step uploads that whole
 directory as an artifact named `usage-bot-failures-<run id>-<run attempt>`,
 downloadable from the run's summary page in the Actions tab.
 
-**Important limitation to know about:** that upload step only runs
-`if: failure()` — meaning only when the job already has a failing *step*.
-The "Run usage bot" step itself only fails (exits non-zero) when the overall
-failure rate exceeds `MAX_FAILURE_RATE` (50%). So if, say, 1 session out of
-10 fails, `bot/failures/` gets written on the runner, but the job step still
-exits 0 (10% is under the 50% threshold) — and the upload step is skipped.
-Those screenshots are never surfaced anywhere; they're deleted with the
-runner. Screenshot artifacts currently only show up for a genuinely
-catastrophic run (more than half of sessions failing), not for the isolated
-one-off failure you'd most want to debug. See "Discrepancies" — this is a
-gap between the design intent and what the workflow actually does, not
-something fixed as part of writing this doc.
+That step runs `if: always()`, deliberately. The "Run usage bot" step only
+exits non-zero above `MAX_FAILURE_RATE` (50%), so an isolated 1-in-18 session
+failure leaves the job green — and under `if: failure()` its screenshot would
+have been thrown away with the runner, which is exactly the failure you would
+most want to look at. `if-no-files-found: ignore` means a clean run uploads
+nothing and costs nothing.
+
+## When the run exits non-zero
+
+Three separate conditions, any one of which turns the job red:
+
+| Condition | Constant | What it means |
+|---|---|---|
+| Too many sessions threw | `MAX_FAILURE_RATE` (0.5) | Seeding, sign-up or the page itself is broken for most sessions. |
+| Too many actions threw | `MAX_ACTION_FAILURE_RATE` (0.3) | Sessions complete, but the UI underneath them has moved — selectors no longer match. |
+| A non-empty plan completed zero actions | — | The strongest form of the above: the bot ran and produced nothing. |
+
+The last two exist because a session counts as successful whenever it does not
+throw, and a failed *action* is deliberately swallowed so the walk can carry
+on. Without them, an app redesign that broke every selector would produce
+eight green, empty runs a day, indefinitely.
 
 ## How the seeding works, and why
 
@@ -352,6 +426,17 @@ ID. If a persona's ID changed between runs, the same "person" would show up
 as a brand-new visitor every single time — silently destroying every
 retention and cohort chart this bot exists to produce. This is the single
 most important rule in this codebase: **never regenerate a persona's ID.**
+
+**Personas share workspaces, because a workspace is an account.** The 12
+entries in `ACCOUNTS` (3 sizes, 3 tiers, 3 regions, 1 to 7 members each) are
+the accounts analytics slices by. `buildSeedData` derives the workspace id
+from the persona's `accountId`, not from the persona, and takes the workspace
+name and the currency/locale straight off the account — so all seven members
+of "Bengaluru FinCollective" seed the same workspace id and see the same
+workspace name in the nav, while their transactions, budgets, goals and
+categories stay their own. Each member is in its own isolated browser context,
+so nothing is shared at runtime; what is shared is the identity the analytics
+tool groups them by.
 
 **Not every session is seeded.** `NEW_VISITOR_RATE` (15%) of sessions
 deliberately skip seeding and go through the real sign-up and

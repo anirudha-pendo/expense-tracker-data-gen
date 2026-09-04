@@ -41,6 +41,13 @@ concurrency:
   group: usage-bot
   cancel-in-progress: false
 
+# The job reads the repository and nothing else — it publishes no packages,
+# writes no commits and opens no issues. Without this block it would inherit
+# whatever the repository default happens to be, which is a broader token than
+# anything here needs.
+permissions:
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -82,18 +89,32 @@ jobs:
       # Chromium only — the bot is Chromium-only by design (bot/seed.ts opens
       # a CDP session), so installing "all" browsers would only waste
       # download time against the free-tier minutes budget.
+      #
+      # No `--with-deps`: that runs apt-get on every one of the ~240 runs a
+      # month, cache hit or not, and ubuntu-latest already ships the system
+      # libraries Playwright's Chromium needs.
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
+      # `github.event.inputs` is populated for workflow_dispatch only; a
+      # repository_dispatch carries its arguments in `client_payload`. Reading
+      # both means the documented curl trigger can set the same two knobs the
+      # Run workflow button can, instead of silently ignoring them. Both sides
+      # render as "" when absent, and run.ts treats "" as unset.
       - name: Run usage bot
         env:
           APP_URL: ${{ vars.APP_URL }}
-          BOT_SESSIONS: ${{ github.event.inputs.sessions }}
-          BOT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          BOT_SESSIONS: ${{ github.event.inputs.sessions || github.event.client_payload.sessions }}
+          BOT_DRY_RUN: ${{ github.event.inputs.dry_run || github.event.client_payload.dry_run }}
         run: npm run run
 
+      # `always()`, not `failure()`: run.ts exits 0 for anything under
+      # MAX_FAILURE_RATE, so an isolated 1-in-18 session failure writes a
+      # screenshot and a sidecar that would otherwise be destroyed with the
+      # runner — exactly the failure you most want to look at. Costs nothing
+      # on a clean run, because if-no-files-found is `ignore`.
       - name: Upload failure artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: usage-bot-failures-${{ github.run_id }}-${{ github.run_attempt }}

@@ -43,7 +43,6 @@ import {
   GOAL_DEADLINE_MONTHS_MAX,
   GOAL_SEED_POOL,
   AMOUNT_ROUNDING_UNIT,
-  WORKSPACE_NAME_TEMPLATES,
   REGION_WORKSPACE_OPTIONS,
   WORKSPACE_CREATED_BUFFER_DAYS_MIN,
   WORKSPACE_CREATED_BUFFER_DAYS_MAX,
@@ -378,6 +377,22 @@ export const ACCOUNTS: Account[] = [
   { id: "acct-eu-small-2", name: "Dublin Solo Saver", region: "EU", tier: "pro", size: "small" },
   { id: "acct-us-small-2", name: "Chicago Solo Saver", region: "US", tier: "free", size: "small" },
 ];
+
+/**
+ * The ACCOUNTS row a persona belongs to. Throws rather than falling back:
+ * an unknown `accountId` would silently hand that persona a workspace of its
+ * own again, which is exactly the bug this lookup exists to prevent, and it
+ * would be invisible in the analytics until someone counted workspaces.
+ */
+function accountFor(persona: Persona): Account {
+  const account = ACCOUNTS.find((candidate) => candidate.id === persona.accountId);
+  if (account === undefined) {
+    throw new Error(
+      `persona "${persona.username}" has accountId "${persona.accountId}", which is not in ACCOUNTS`,
+    );
+  }
+  return account;
+}
 
 // =============================================================================
 // Personas
@@ -753,12 +768,29 @@ export function buildSeedData(persona: Persona, now: Date): SeedData {
   const archetypeDef = ARCHETYPES[persona.archetype];
   const nowYm = ymFromDate(now);
 
-  const workspaceId = deterministicId(rng);
-  const workspaceOption = rng.pick(REGION_WORKSPACE_OPTIONS[persona.region]);
-  const nameTemplate = rng.pick(WORKSPACE_NAME_TEMPLATES);
-  const firstName = persona.displayName.trim().split(/\s+/)[0] ?? persona.displayName;
-  const workspaceName = nameTemplate.replace("{name}", firstName);
+  // The workspace IS the account (see the spec's Accounts section), so its
+  // identity comes from the ACCOUNT, never the persona: a second, separate
+  // PRNG keyed on `persona.accountId` means every member of an account
+  // derives the same workspace id, and the name and money settings come
+  // straight off the ACCOUNTS row. Keying this off `persona.id` — as this
+  // did originally — gave 40 personas 40 single-member workspaces and the
+  // 12 ACCOUNTS never reached the browser at all, which killed the spec's
+  // "Segments and accounts" consumer outright.
+  const account = accountFor(persona);
+  const accountRng = makeRng(persona.accountId);
+  const workspaceId = deterministicId(accountRng);
+  // Drawn from the ACCOUNT's region off the ACCOUNT's PRNG, so all members
+  // of one account agree on currency and number format.
+  const workspaceOption = accountRng.pick(REGION_WORKSPACE_OPTIONS[account.region]);
+  const workspaceName = account.name;
 
+  // Deliberately still persona-derived, unlike the three fields above:
+  // `workspaceCreatedAt` is the floor every transaction, budget and goal
+  // timestamp is measured back from, and archetypes carry different history
+  // lengths (4 to 12 months). An account-wide creation date would leave a
+  // 12-month `power` member holding transactions that predate their own
+  // workspace. Nothing cross-checks it — each member sees only their own
+  // isolated IndexedDB — so the internally consistent choice wins.
   const earliestYm = nowYm - (archetypeDef.historyMonths - 1);
   const earliestDate = dateFromYm(earliestYm, 1, 0, 0);
   const bufferDays = rng.int(WORKSPACE_CREATED_BUFFER_DAYS_MIN, WORKSPACE_CREATED_BUFFER_DAYS_MAX);
