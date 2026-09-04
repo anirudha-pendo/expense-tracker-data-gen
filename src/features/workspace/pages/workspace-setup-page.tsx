@@ -25,6 +25,11 @@ export function WorkspaceSetupPage() {
       await createWorkspace(workspace);
       await seedDefaultCategories(workspace.id);
       setActiveWorkspace(workspace);
+      pendo?.track("workspace_created", {
+        currency: values.currency,
+        locale: values.locale,
+        workspaceName: values.name,
+      });
       navigate("/", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create workspace");

@@ -12,6 +12,10 @@ export function SignUpPage() {
   async function handleSignUp(values: SignUpFormValues) {
     try {
       await signUp(values.username, values.displayName, values.password);
+      pendo?.track("account_created", {
+        username: values.username,
+        hasDisplayName: Boolean(values.displayName),
+      });
       navigate("/setup-workspace", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign up failed");

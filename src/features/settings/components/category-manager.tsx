@@ -159,6 +159,11 @@ export function CategoryManager() {
       };
       await createCategory(cat);
       await reload();
+      pendo?.track("category_created", {
+        categoryName: values.name,
+        scope: values.scope,
+        color: values.color,
+      });
       setShowForm(false);
       toast.success("Category added");
     } catch {
@@ -183,6 +188,10 @@ export function CategoryManager() {
     try {
       await deleteCategory(deletingCat.id);
       await reload();
+      pendo?.track("category_deleted", {
+        categoryName: deletingCat.name,
+        scope: deletingCat.scope,
+      });
       setDeletingCat(null);
       toast.success("Category deleted");
     } catch {
