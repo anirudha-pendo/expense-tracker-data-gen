@@ -522,13 +522,14 @@ function amountFor(ctx: SessionCtx, categoryName: string): string {
 // descriptions.
 //
 // MIRRORED RULE — keep in lockstep with the reserved-word stripping in
-// `src/features/quick-add/lib/parser.ts` (the TYPE_KEYWORDS/token filter
-// around lines 126-135). If that parser ever changes which tokens it strips,
-// or stops stripping them, this list and `parsedDescription` below go stale
-// silently: nothing here imports from src/ (separate tsconfig, separate module
-// graph) and `tsc --noEmit` cannot see the drift. The symptom would be
-// `useQuickAdd` failing its toast assertion on a handful of descriptions.
-// If you are editing that parser, edit this too.
+// `src/features/quick-add/lib/parser.ts` (the `tokens.filter(...)` step in
+// `parseQuickAdd` doing the inline `lower === "income" || lower === "expense"`
+// check, lines 126-135; there is no TYPE_KEYWORDS constant). If that parser
+// ever changes which tokens it strips, or stops stripping them, this list and
+// `parsedDescription` below go stale silently: nothing here imports from src/
+// (separate tsconfig, separate module graph) and `tsc --noEmit` cannot see the
+// drift. The symptom would be `useQuickAdd` failing its toast assertion on a
+// handful of descriptions. If you are editing that parser, edit this too.
 const QUICK_ADD_TYPE_KEYWORDS = ["income", "expense"];
 
 function parsedDescription(typed: string): string {

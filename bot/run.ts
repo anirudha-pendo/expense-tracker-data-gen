@@ -18,7 +18,8 @@
 //   APP_URL       where the app is served (default http://localhost:5173)
 //   HEADLESS      "false" to watch the run in a real window
 //   BOT_NOW       ISO timestamp overriding the clock the plan is built from
-//   BOT_SESSIONS  absolute override of the total session count
+//   BOT_SESSIONS  upper bound on the total session count; the show-up gate
+//                 can plan fewer
 //   BOT_DRY_RUN   "true" prints the plan and exits 0 without a browser
 //
 // Rules this file exists to enforce, each learned the hard way and none of
@@ -891,7 +892,7 @@ async function main(): Promise<number> {
 
   if (plan.total === 0) {
     console.log(
-      `=== usage bot ===\nclock ${describeClock(now)}\nNo sessions planned for this hour — nothing to do.`,
+      `=== usage bot ===\nclock ${describeClock(now)}\nNo sessions planned for this hour (requested ${requestedTotal(plan)}) — nothing to do.`,
     );
     // An empty plan is a successful run, not a 0/0 failure.
     return 0;

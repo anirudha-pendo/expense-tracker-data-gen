@@ -92,8 +92,12 @@ export const SHOW_UP_GATE_PERIOD: "day" | "run" = "day";
  *
  * `"plan-fewer"` (the default): the slot simply is not planned. Fewer people
  * showed up, so there was less traffic — which is the honest reading of the
- * gate, and it keeps the new-vs-returning mix at NEW_VISITOR_RATE. It also
- * means BOT_SESSIONS is a ceiling rather than an exact count.
+ * gate, and it keeps the new-vs-returning mix close to NEW_VISITOR_RATE. It
+ * is not exact: new visitors are still drawn per *requested* slot while only
+ * returning slots get dropped, so the share drifts upward on busy hours —
+ * measured at 17.2% at the 15:00 peak, 11.3% at the 03:00 trough, 16.1%
+ * overall, against a 15% target. It also means BOT_SESSIONS is a ceiling
+ * rather than an exact count.
  *
  * `"new-visitor"`: the slot is filled by a brand-new visitor signing up
  * instead. Holds volume (and BOT_SESSIONS) exactly, at the cost of pushing the

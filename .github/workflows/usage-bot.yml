@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       sessions:
-        description: "Absolute session count override (maps to BOT_SESSIONS). Leave blank to use the traffic curve for the current hour."
+        description: "Ceiling on session count (maps to BOT_SESSIONS) — the show-up gate can plan fewer. Leave blank to use the traffic curve for the current hour."
         required: false
         type: string
       dry_run:
