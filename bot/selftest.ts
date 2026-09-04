@@ -11,7 +11,6 @@ import {
   BASE_SESSIONS_PER_RUN,
   sessionsForRegion,
   makeRng,
-  SEED_ANCHOR_DATE,
   type Region,
 } from "./config";
 import {
@@ -140,6 +139,10 @@ check("int(min, max) stays in bounds and reaches both ends over 1000 draws", () 
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// `buildSeedData` requires a `now` — there is no default, so it can never be
+// accidentally non-deterministic. Tests always pass this same fixed instant.
+const TEST_NOW = new Date("2026-09-04T00:00:00.000Z");
+
 check("all 40 persona ids are unique and match a UUID v4 regex", () => {
   assert.strictEqual(PERSONAS.length, 40, `expected 40 personas, got ${PERSONAS.length}`);
   const seen = new Set<string>();
@@ -174,10 +177,10 @@ check("every account has at least one persona, and large accounts have at least 
   }
 });
 
-check("buildSeedData on the same persona twice yields deeply equal output", () => {
+check("buildSeedData on the same persona and now twice yields deeply equal output", () => {
   for (const persona of PERSONAS) {
-    const first = buildSeedData(persona);
-    const second = buildSeedData(persona);
+    const first = buildSeedData(persona, TEST_NOW);
+    const second = buildSeedData(persona, TEST_NOW);
     assert.deepStrictEqual(first, second, `${persona.username}: buildSeedData is not deterministic`);
   }
 });
@@ -185,7 +188,7 @@ check("buildSeedData on the same persona twice yields deeply equal output", () =
 check("buildSeedData on two different personas yields different user ids", () => {
   const userIds = new Set<string>();
   for (const persona of PERSONAS) {
-    userIds.add(buildSeedData(persona).user.id);
+    userIds.add(buildSeedData(persona, TEST_NOW).user.id);
   }
   assert.strictEqual(
     userIds.size,
@@ -198,7 +201,7 @@ check(
   "every transaction's categoryId resolves to one of the workspace's own categories, and every budget's categoryId does too",
   () => {
     for (const persona of PERSONAS) {
-      const seed = buildSeedData(persona);
+      const seed = buildSeedData(persona, TEST_NOW);
       const categoryIds = new Set(seed.categories.map((c) => c.id));
       for (const tx of seed.transactions) {
         assert.ok(
@@ -228,15 +231,14 @@ function dateOnlyFromYm(ym: number, day: number): string {
 }
 
 check("transaction dates all fall inside the archetype's history window", () => {
-  const anchor = new Date(SEED_ANCHOR_DATE);
-  const anchorYm = ymFromDate(anchor);
-  const windowEnd = anchor.toISOString().slice(0, 10);
+  const nowYm = ymFromDate(TEST_NOW);
+  const windowEnd = TEST_NOW.toISOString().slice(0, 10);
 
   for (const persona of PERSONAS) {
     const { historyMonths } = ARCHETYPES[persona.archetype];
-    const earliestYm = anchorYm - (historyMonths - 1);
+    const earliestYm = nowYm - (historyMonths - 1);
     const windowStart = dateOnlyFromYm(earliestYm, 1);
-    const seed = buildSeedData(persona);
+    const seed = buildSeedData(persona, TEST_NOW);
     for (const tx of seed.transactions) {
       assert.ok(
         tx.date >= windowStart && tx.date <= windowEnd,

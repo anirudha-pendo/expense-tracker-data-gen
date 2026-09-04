@@ -1,6 +1,9 @@
-// Accounts, personas and archetypes for the usage bot, plus the deterministic
-// seed data ("backstory") each persona's workspace carries before the bot
-// ever drives a browser against it.
+// Accounts, personas and archetypes for the usage bot, plus the generation
+// logic that builds the deterministic seed data ("backstory") each persona's
+// workspace carries before the bot ever drives a browser against it. The
+// raw data tables that logic draws from (category amount ranges, goal name
+// pools, etc.) live in `./seed-data` — that's seed data, not a behaviour
+// tunable, so it's kept out of `./config` (which stays scannable knobs only).
 //
 // Persona ids are hardcoded UUID v4 literals, never generated at runtime.
 // The app's own user id becomes the analytics visitor id, so a persona whose
@@ -11,12 +14,9 @@
 // graph) — the record types below mirror `src/types/index.ts` field-for-field
 // but are declared locally.
 
+import { makeRng, type Rng, type Region } from "./config";
 import {
-  makeRng,
-  type Rng,
-  type Region,
   PERSONA_PASSWORD,
-  SEED_ANCHOR_DATE,
   DEFAULT_CATEGORY_SEEDS,
   CUSTOM_CATEGORY_SEEDS,
   CUSTOM_CATEGORY_COUNT_MIN,
@@ -43,7 +43,7 @@ import {
   WORKSPACE_CREATED_BUFFER_DAYS_MIN,
   WORKSPACE_CREATED_BUFFER_DAYS_MAX,
   type CategorySeed,
-} from "./config";
+} from "./seed-data";
 
 // =============================================================================
 // Local mirrors of src/types/index.ts (field-for-field; do not import src/)
@@ -472,8 +472,6 @@ export interface SeedData {
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const ANCHOR = new Date(SEED_ANCHOR_DATE);
-const ANCHOR_YM = ymFromDate(ANCHOR);
 
 /** "Year-month" as a single increasing integer (year * 12 + month), so month arithmetic never has to deal with `Date` rollover surprises. */
 function ymFromDate(date: Date): number {
@@ -529,17 +527,18 @@ function roundToUnit(value: number, unit: number): number {
 }
 
 /**
- * Picks a date within the last `lookbackMonths` months of the seed anchor,
- * weighted so more recent months are more likely than older ones — a flat
- * spread looks synthetic in exactly the charts this data exists to populate.
- * Never later than the anchor itself.
+ * Picks a date within the last `lookbackMonths` months of `now`, weighted so
+ * more recent months are more likely than older ones — a flat spread looks
+ * synthetic in exactly the charts this data exists to populate. Never later
+ * than `now` itself.
  */
-function pickHistoryDate(rng: Rng, lookbackMonths: number): Date {
+function pickHistoryDate(rng: Rng, lookbackMonths: number, now: Date): Date {
+  const nowYm = ymFromDate(now);
   const monthsAgoOptions = Array.from({ length: lookbackMonths }, (_, i) => i);
   // monthsAgo = 0 is the most recent month; weight decreases as it gets older.
   const monthsAgo = rng.weighted(monthsAgoOptions, (m) => lookbackMonths - m);
-  const targetYm = ANCHOR_YM - monthsAgo;
-  const maxDay = monthsAgo === 0 ? ANCHOR.getUTCDate() : daysInMonth(targetYm);
+  const targetYm = nowYm - monthsAgo;
+  const maxDay = monthsAgo === 0 ? now.getUTCDate() : daysInMonth(targetYm);
   const day = rng.int(1, maxDay);
   const hour = rng.int(0, 23);
   const minute = rng.int(0, 59);
@@ -589,6 +588,7 @@ function buildTransactions(
   categoryEntries: CategoryEntry[],
   historyMonths: number,
   historyTx: number,
+  now: Date,
 ): Transaction[] {
   const expensePool = categoryEntries.filter((e) => e.seed.scope === "expense" || e.seed.scope === "both");
   const incomePool = categoryEntries.filter((e) => e.seed.scope === "income" || e.seed.scope === "both");
@@ -600,7 +600,7 @@ function buildTransactions(
     const amountCents = rng.int(entry.seed.amountMin * 100, entry.seed.amountMax * 100);
     const amount = amountCents / 100;
     const description = rng.pick(entry.seed.descriptions);
-    const when = pickHistoryDate(rng, historyMonths);
+    const when = pickHistoryDate(rng, historyMonths, now);
     const timestamp = when.toISOString();
 
     transactions.push({
@@ -650,7 +650,9 @@ function buildGoals(
   workspaceId: string,
   historyMonths: number,
   workspaceCreatedAt: string,
+  now: Date,
 ): Goal[] {
+  const nowYm = ymFromDate(now);
   const count = rng.int(GOAL_COUNT_MIN, GOAL_COUNT_MAX);
   const chosenSeeds = pickDistinct(rng, GOAL_SEED_POOL, count);
   const lookbackMonths = Math.min(historyMonths, GOAL_CONTRIBUTION_LOOKBACK_MONTHS);
@@ -664,7 +666,7 @@ function buildGoals(
     for (let i = 0; i < contributionCount; i++) {
       const percent = rng.int(GOAL_CONTRIBUTION_PERCENT_MIN, GOAL_CONTRIBUTION_PERCENT_MAX);
       const amount = roundToUnit((targetAmount * percent) / 100, AMOUNT_ROUNDING_UNIT) || AMOUNT_ROUNDING_UNIT;
-      const when = pickHistoryDate(rng, lookbackMonths);
+      const when = pickHistoryDate(rng, lookbackMonths, now);
       contributions.push({
         id: deterministicId(rng),
         amount,
@@ -690,7 +692,7 @@ function buildGoals(
 
     if (rng.chance(GOAL_DEADLINE_CHANCE)) {
       const monthsAhead = rng.int(GOAL_DEADLINE_MONTHS_MIN, GOAL_DEADLINE_MONTHS_MAX);
-      goal.deadline = toDateOnly(dateFromYm(ANCHOR_YM + monthsAhead, ANCHOR.getUTCDate(), 0, 0));
+      goal.deadline = toDateOnly(dateFromYm(nowYm + monthsAhead, now.getUTCDate(), 0, 0));
     }
 
     return goal;
@@ -700,17 +702,25 @@ function buildGoals(
 /**
  * Builds a persona's full workspace backstory: user, workspace, categories,
  * historical transactions, budgets and goals. Every id and random choice is
- * derived from `makeRng(persona.id)`, and all dates are computed relative to
- * the fixed `SEED_ANCHOR_DATE` rather than the wall clock — so this is a pure
- * function of `persona` and returns byte-identical output every time it's
- * called with the same persona.
+ * derived from `makeRng(persona.id)`, and every date is computed as an
+ * offset backwards from the `now` argument rather than the wall clock — so
+ * this is a pure function of `(persona, now)` and returns byte-identical
+ * output every time it's called with the same two arguments.
+ *
+ * `now` is deliberately required, not defaulted: an implicit `new Date()`
+ * would silently reintroduce a non-deterministic function, and it would also
+ * mean seeded history goes stale — a persona seeded once and never
+ * re-seeded would look increasingly inactive as real time passed. Callers
+ * pass the real current time; tests pass a fixed `Date` and get
+ * byte-identical output across calls.
  *
  * `user.passwordHash` and `user.salt` are left empty; Task 3 fills them in
  * (hashing needs the browser's SubtleCrypto, which isn't available here).
  */
-export function buildSeedData(persona: Persona): SeedData {
+export function buildSeedData(persona: Persona, now: Date): SeedData {
   const rng = makeRng(persona.id);
   const archetypeDef = ARCHETYPES[persona.archetype];
+  const nowYm = ymFromDate(now);
 
   const workspaceId = deterministicId(rng);
   const workspaceOption = rng.pick(REGION_WORKSPACE_OPTIONS[persona.region]);
@@ -718,7 +728,7 @@ export function buildSeedData(persona: Persona): SeedData {
   const firstName = persona.displayName.trim().split(/\s+/)[0] ?? persona.displayName;
   const workspaceName = nameTemplate.replace("{name}", firstName);
 
-  const earliestYm = ANCHOR_YM - (archetypeDef.historyMonths - 1);
+  const earliestYm = nowYm - (archetypeDef.historyMonths - 1);
   const earliestDate = dateFromYm(earliestYm, 1, 0, 0);
   const bufferDays = rng.int(WORKSPACE_CREATED_BUFFER_DAYS_MIN, WORKSPACE_CREATED_BUFFER_DAYS_MAX);
   const workspaceCreatedAt = new Date(earliestDate.getTime() - bufferDays * MS_PER_DAY).toISOString();
@@ -749,9 +759,10 @@ export function buildSeedData(persona: Persona): SeedData {
     categoryEntries,
     archetypeDef.historyMonths,
     archetypeDef.historyTx,
+    now,
   );
   const budgets = buildBudgets(rng, workspaceId, categoryEntries, workspaceCreatedAt);
-  const goals = buildGoals(rng, workspaceId, archetypeDef.historyMonths, workspaceCreatedAt);
+  const goals = buildGoals(rng, workspaceId, archetypeDef.historyMonths, workspaceCreatedAt, now);
 
   return {
     user,
