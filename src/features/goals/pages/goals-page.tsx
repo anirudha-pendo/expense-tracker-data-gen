@@ -35,6 +35,11 @@ export function GoalsPage() {
         deadline: values.deadline || undefined,
         color: values.color,
       });
+      pendo?.track("goal_created", {
+        targetAmount: values.targetAmount,
+        hasDeadline: Boolean(values.deadline),
+        color: values.color,
+      });
       setShowForm(false);
       toast.success("Goal created");
     } catch {
@@ -52,6 +57,11 @@ export function GoalsPage() {
         deadline: values.deadline || undefined,
         color: values.color,
       });
+      pendo?.track("goal_updated", {
+        targetAmount: values.targetAmount,
+        hasDeadline: Boolean(values.deadline),
+        color: values.color,
+      });
       setEditingGoal(null);
       toast.success("Goal updated");
     } catch {
@@ -67,6 +77,15 @@ export function GoalsPage() {
         date: values.date,
         note: values.note || undefined,
       });
+      const totalSaved = contributingGoal.contributions.reduce((s, c) => s + c.amount, 0) + values.amount;
+      pendo?.track("goal_contribution_added", {
+        amount: values.amount,
+        goalName: contributingGoal.name,
+        goalTargetAmount: contributingGoal.targetAmount,
+        totalSavedAfter: totalSaved,
+        percentCompleteAfter: Math.round((totalSaved / contributingGoal.targetAmount) * 100),
+        contributionCount: contributingGoal.contributions.length + 1,
+      });
       setContributingGoal(null);
       toast.success("Contribution added");
     } catch {
@@ -78,6 +97,13 @@ export function GoalsPage() {
     if (!deletingGoal) return;
     try {
       await removeGoal(deletingGoal.id);
+      const totalSaved = deletingGoal.contributions.reduce((s, c) => s + c.amount, 0);
+      pendo?.track("goal_deleted", {
+        goalName: deletingGoal.name,
+        targetAmount: deletingGoal.targetAmount,
+        contributionCount: deletingGoal.contributions.length,
+        percentComplete: Math.round((totalSaved / deletingGoal.targetAmount) * 100),
+      });
       setDeletingGoal(null);
       toast.success("Goal deleted");
     } catch {

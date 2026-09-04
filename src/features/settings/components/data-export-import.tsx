@@ -26,10 +26,16 @@ export function DataExportImport() {
         getGoalsByWorkspaceId(workspace.id),
         getBudgetsByWorkspaceId(workspace.id),
       ]);
-      // Receipt attachments (binary blobs) are intentionally not included.
       const data = { workspace, transactions, categories, goals, budgets, exportedAt: new Date().toISOString() };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       downloadBlob(blob, `expense-tracker-export-${new Date().toISOString().slice(0, 10)}.json`);
+      pendo?.track("data_exported", {
+        format: "json",
+        transactionCount: transactions.length,
+        categoryCount: categories.length,
+        goalCount: goals.length,
+        budgetCount: budgets.length,
+      });
       toast.success("Exported successfully");
     } catch {
       toast.error("Export failed");
@@ -61,6 +67,13 @@ export function DataExportImport() {
       const csv = [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
       downloadBlob(blob, `transactions-${new Date().toISOString().slice(0, 10)}.csv`);
+      pendo?.track("data_exported", {
+        format: "csv",
+        transactionCount: transactions.length,
+        categoryCount: categories.length,
+        goalCount: 0,
+        budgetCount: 0,
+      });
       toast.success("CSV exported successfully");
     } catch {
       toast.error("CSV export failed");
@@ -98,7 +111,8 @@ export function DataExportImport() {
       }
 
       // Optional sections from newer exports; older files simply lack them.
-      let extras = 0;
+      let goalsImported = 0;
+      let budgetsImported = 0;
       if (Array.isArray(data.goals)) {
         for (const goal of data.goals) {
           await createGoal({
@@ -107,16 +121,24 @@ export function DataExportImport() {
             workspaceId: workspace.id,
             contributions: (goal.contributions ?? []).map((c) => ({ ...c, id: crypto.randomUUID() })),
           });
-          extras++;
+          goalsImported++;
         }
       }
       if (Array.isArray(data.budgets)) {
         for (const budget of data.budgets) {
           await upsertBudget({ ...budget, id: crypto.randomUUID(), workspaceId: workspace.id });
-          extras++;
+          budgetsImported++;
         }
       }
 
+      pendo?.track("data_imported", {
+        transactionsImported: imported,
+        goalsImported,
+        budgetsImported,
+        totalItemsImported: imported + goalsImported + budgetsImported,
+      });
+
+      const extras = goalsImported + budgetsImported;
       toast.success(
         `Imported ${imported} transaction${imported !== 1 ? "s" : ""}${
           extras > 0 ? ` and ${extras} goal${extras !== 1 ? "s" : ""}/budget${extras !== 1 ? "s" : ""}` : ""

@@ -12,6 +12,9 @@ export function SignInPage() {
   async function handleSignIn(values: SignInFormValues) {
     try {
       await signIn(values.username, values.password);
+      pendo?.track("sign_in_completed", {
+        hasWorkspace,
+      });
       navigate(hasWorkspace ? "/" : "/setup-workspace", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");

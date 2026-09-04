@@ -83,8 +83,20 @@ export function useAttachments(workspaceId: string, transactionId: string | null
             blob: file,
             createdAt: new Date().toISOString(),
           });
+          pendo?.track("attachment_uploaded", {
+            mimeType: file.type,
+            fileSize: file.size,
+            isStaged: false,
+            totalAttachmentCount: count,
+          });
         } else {
           setStagedFiles((prev) => [...prev, { id: crypto.randomUUID(), file }]);
+          pendo?.track("attachment_uploaded", {
+            mimeType: file.type,
+            fileSize: file.size,
+            isStaged: true,
+            totalAttachmentCount: count,
+          });
         }
       }
       if (transactionId) await reload();

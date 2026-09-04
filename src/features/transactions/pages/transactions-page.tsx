@@ -72,6 +72,14 @@ export function TransactionsPage() {
     try {
       const created = await addTransaction({ ...values, workspaceId: workspace!.id, notes: values.notes ?? "" });
       await addAttachments.flushStaged(created.id);
+      pendo?.track("transaction_created", {
+        type: values.type,
+        amount: values.amount,
+        categoryId: values.categoryId,
+        isRecurring: values.isRecurring,
+        hasNotes: Boolean(values.notes),
+        attachmentCount: addAttachments.totalCount,
+      });
       setShowForm(false);
       toast.success("Transaction added");
     } catch {
@@ -89,6 +97,13 @@ export function TransactionsPage() {
         date: values.date,
       };
       await editTransaction(updated);
+      pendo?.track("transaction_updated", {
+        type: values.type,
+        amount: values.amount,
+        categoryId: values.categoryId,
+        isRecurring: values.isRecurring,
+        hasNotes: Boolean(values.notes),
+      });
       setEditingTx(null);
       await refreshAttachmentCounts();
       toast.success("Transaction updated");
@@ -101,6 +116,10 @@ export function TransactionsPage() {
     if (!deletingTx) return;
     try {
       await removeTransaction(deletingTx.id);
+      pendo?.track("transaction_deleted", {
+        transactionType: deletingTx.type,
+        amount: deletingTx.amount,
+      });
       setDeletingTx(null);
       toast.success("Transaction deleted");
     } catch {
