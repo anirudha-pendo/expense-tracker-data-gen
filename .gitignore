@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# SDD scratch
+.superpowers/
+
+# Usage bot
+bot/node_modules
+bot/failures

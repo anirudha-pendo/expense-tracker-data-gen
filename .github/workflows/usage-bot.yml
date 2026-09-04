@@ -1,0 +1,122 @@
+name: Usage Bot
+
+# Drives the Playwright usage bot in bot/ against the deployed expense-tracker
+# SPA so an analytics agent records genuine behaviour. This repo is private,
+# so Actions minutes are metered against the ~2,000/month free tier — that is
+# why the schedule below starts conservative at eight runs a day, one per
+# follow-the-sun traffic peak (see bot/config.ts's REGION_CURVE for the
+# numbers behind each comment).
+
+on:
+  schedule:
+    # All times UTC. Region peaks are read off REGION_CURVE in bot/config.ts.
+    - cron: "0 3 * * *"  # overnight trough — quietest run of the day (US 0.09, IN 0.06, EU 0.02)
+    - cron: "0 6 * * *"  # IN morning peak (IN 0.85)
+    - cron: "0 8 * * *"  # IN still high, EU morning ramp (IN 0.90, EU 0.80)
+    - cron: "0 10 * * *" # EU midday peak (EU 1.00)
+    - cron: "0 13 * * *" # EU afternoon / US morning overlap (EU 0.85, US 0.70)
+    - cron: "0 15 * * *" # US afternoon peak (US 1.00)
+    - cron: "0 18 * * *" # US evening (US 0.80)
+    - cron: "0 21 * * *" # US late-evening tail (US 0.60)
+  workflow_dispatch:
+    inputs:
+      sessions:
+        description: "Ceiling on session count (maps to BOT_SESSIONS) — the show-up gate can plan fewer. Leave blank to use the traffic curve for the current hour."
+        required: false
+        type: string
+      dry_run:
+        description: "Print the planned sessions and exit without launching a browser (maps to BOT_DRY_RUN)."
+        required: false
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [run-usage-bot]
+
+# A manual or repository_dispatch run must never stack on a scheduled one —
+# they share one worker (MAX_CONCURRENCY browser contexts against one app),
+# so two runs overlapping would just contend with each other. Queue instead
+# of cancelling: a triggered run that got skipped would defeat the point of
+# triggering it.
+concurrency:
+  group: usage-bot
+  cancel-in-progress: false
+
+# The job reads the repository and nothing else — it publishes no packages,
+# writes no commits and opens no issues. Without this block it would inherit
+# whatever the repository default happens to be, which is a broader token than
+# anything here needs.
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ steps.playwright-version.outputs.version }}
+
+      # Runs before any browser is installed: a broken traffic curve or a
+      # config typo fails here in about two seconds instead of after several
+      # minutes of Chromium download and browser time. This ordering is the
+      # entire reason the selftest was kept.
+      - name: Selftest
+        run: npm run selftest
+
+      # Chromium only — the bot is Chromium-only by design (bot/seed.ts opens
+      # a CDP session), so installing "all" browsers would only waste
+      # download time against the free-tier minutes budget.
+      #
+      # No `--with-deps`: that runs apt-get on every one of the ~240 runs a
+      # month, cache hit or not, and ubuntu-latest already ships the system
+      # libraries Playwright's Chromium needs.
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      # `github.event.inputs` is populated for workflow_dispatch only; a
+      # repository_dispatch carries its arguments in `client_payload`. Reading
+      # both means the documented curl trigger can set the same two knobs the
+      # Run workflow button can, instead of silently ignoring them. Both sides
+      # render as "" when absent, and run.ts treats "" as unset.
+      - name: Run usage bot
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          BOT_SESSIONS: ${{ github.event.inputs.sessions || github.event.client_payload.sessions }}
+          BOT_DRY_RUN: ${{ github.event.inputs.dry_run || github.event.client_payload.dry_run }}
+        run: npm run run
+
+      # `always()`, not `failure()`: run.ts exits 0 for anything under
+      # MAX_FAILURE_RATE, so an isolated 1-in-18 session failure writes a
+      # screenshot and a sidecar that would otherwise be destroyed with the
+      # runner — exactly the failure you most want to look at. Costs nothing
+      # on a clean run, because if-no-files-found is `ignore`.
+      - name: Upload failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: usage-bot-failures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bot/failures/
+          if-no-files-found: ignore

@@ -71,3 +71,13 @@ export default defineConfig([
   },
 ])
 ```
+
+## Usage bot
+
+`bot/` holds a Playwright robot that drives this app through its real UI, so
+analytics tools testing against it (Pendo/Novus) see genuine behaviour
+instead of an empty app. It runs on a schedule in GitHub Actions and can also
+be triggered manually or from the command line.
+
+See [`bot/README.md`](bot/README.md) for how to run it locally, every
+setting it takes, and how to trigger it remotely.
