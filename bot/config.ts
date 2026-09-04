@@ -244,6 +244,8 @@ export const WORKSPACE_LOCALE_CHANGE_RATE = 0.25;
 
 /** Chance the command palette is opened with Ctrl+K rather than the header button. */
 export const QUICK_ADD_SHORTCUT_RATE = 0.5;
+/** How long the command palette gets to lazily load the workspace's categories and render its chips. Shorter than DIALOG_TIMEOUT_MS on purpose: a palette with genuinely no matching category should fail fast and say so, not sit out a full dialog timeout. */
+export const QUICK_ADD_CHIPS_TIMEOUT_MS = 5000;
 
 // --- Insights dwell ---------------------------------------------------------
 //
@@ -256,3 +258,18 @@ export const INSIGHTS_DWELL_PAUSES_MAX = 4;
 export const INSIGHTS_SCROLL_RATE = 0.7;
 export const INSIGHTS_SCROLL_PX_MIN = 200;
 export const INSIGHTS_SCROLL_PX_MAX = 900;
+
+// --- Recovering from a failed action ----------------------------------------
+//
+// A failed action does not end the session (the walk continues and the
+// failure is counted — ending early would truncate session length, which is
+// itself analytics data the bot exists to make realistic), so whatever
+// overlay the thrown action left open has to be cleared before the next one
+// runs. These bound `resetUiState`'s effort so a page that will not clear
+// costs a second, not a timeout.
+
+/** How many Escape presses `resetUiState` will spend. Radix closes one layer per press, so a select listbox opened inside a dialog needs two. */
+export const UI_RESET_MAX_ESCAPES = 5;
+/** How long `resetUiState` lets a layer finish its close animation and unmount before re-checking. */
+export const UI_RESET_SETTLE_MS = 400;
+

@@ -57,17 +57,19 @@ import {
   WORKSPACE_CURRENCY_CHANGE_RATE,
   WORKSPACE_LOCALE_CHANGE_RATE,
   QUICK_ADD_SHORTCUT_RATE,
+  QUICK_ADD_CHIPS_TIMEOUT_MS,
   INSIGHTS_DWELL_PAUSES_MIN,
   INSIGHTS_DWELL_PAUSES_MAX,
   INSIGHTS_SCROLL_RATE,
   INSIGHTS_SCROLL_PX_MIN,
   INSIGHTS_SCROLL_PX_MAX,
+  UI_RESET_MAX_ESCAPES,
+  UI_RESET_SETTLE_MS,
   type Rng,
 } from "./config";
 import { ARCHETYPES, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
-  CATEGORY_PRESET_COLORS,
   CUSTOM_CATEGORY_SEEDS,
   DEFAULT_CATEGORY_SEEDS,
   EXPENSE_TRANSACTION_RATE,
@@ -75,6 +77,7 @@ import {
   GOAL_DEADLINE_MONTHS_MAX,
   GOAL_DEADLINE_MONTHS_MIN,
   GOAL_SEED_POOL,
+  SWATCH_PRESET_COLORS,
   WORKSPACE_NAME_TEMPLATES,
   type CategorySeed,
 } from "./seed-data";
@@ -128,6 +131,69 @@ export async function preparePage(page: Page): Promise<void> {
     const w = window as unknown as { __name?: <T>(target: T) => T };
     w.__name ??= (target) => target;
   });
+}
+
+// =============================================================================
+// resetUiState — the recovery hatch for a failed action
+// =============================================================================
+
+/**
+ * Every layer this app can leave floating over the page: the two radix
+ * dialog kinds, a select's portaled listbox, and a dropdown menu.
+ */
+const OVERLAY_SELECTOR = [
+  '[data-slot="dialog-content"]',
+  '[data-slot="alert-dialog-content"]',
+  '[role="listbox"]',
+  '[role="menu"]',
+].join(", ");
+
+/**
+ * Dismisses whatever overlay the page is left holding, so the next action
+ * starts from a page it can actually click.
+ *
+ * TASK 5 CALLS THIS FROM THE CATCH BLOCK AROUND AN ACTION. A failed action
+ * does not end the session — the walk continues and the failure is counted,
+ * because ending early would truncate session length, and session length is
+ * itself analytics data this bot exists to make realistic. The actions' own
+ * success and abandonment paths always close what they opened; their *error*
+ * paths cannot, because a throw is by definition the point where they stopped
+ * being in control. A select that threw mid-pick leaves its listbox open, a
+ * submit that timed out leaves its dialog open, and a row menu that could not
+ * find its item leaves the dropdown open. The worst of those is a leaked
+ * quick-add palette: both Ctrl+K and the header button refuse to open over an
+ * existing dialog, so one leak would poison every later `useQuickAdd` in the
+ * session.
+ *
+ * Safe to call when nothing is open — it checks first and returns.
+ *
+ * IT NEVER THROWS. It runs inside a catch block, where raising would replace
+ * the real failure with a meaningless one. If it cannot clear the page it
+ * logs and returns, and the next action fails on its own terms with its own
+ * message.
+ */
+export async function resetUiState(
+  page: Page,
+  log: (msg: string) => void = (msg) => console.warn(msg),
+): Promise<void> {
+  try {
+    const overlays = page.locator(OVERLAY_SELECTOR);
+    for (let attempt = 0; attempt < UI_RESET_MAX_ESCAPES; attempt++) {
+      if ((await overlays.count()) === 0) return;
+      // Radix closes one layer per Escape and unmounts it after its exit
+      // animation, so this presses, lets the DOM settle, then re-counts —
+      // rather than waiting on any single element, which would stall for the
+      // full timeout whenever the layer that closed was not the one waited on.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(UI_RESET_SETTLE_MS);
+    }
+    const remaining = await overlays.count();
+    if (remaining > 0) {
+      log(`resetUiState: ${remaining} overlay element(s) still open after ${UI_RESET_MAX_ESCAPES} Escape presses`);
+    }
+  } catch (err) {
+    log(`resetUiState: could not clear the page (${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
+  }
 }
 
 // =============================================================================
@@ -251,6 +317,8 @@ async function ensureAppRoute(page: Page, ctx: SessionCtx): Promise<void> {
   // bar. A real browser navigation is the only honest way back.
   await page.goto(APP_URL);
   await waitForRoute(page, "dashboard");
+  // Logged only after the wait: if the session is signed out this never
+  // reaches here, and a "recovered" line above would have been a lie.
   ctx.log("recovered:navigated to the dashboard from a non-app route");
 }
 
@@ -441,6 +509,23 @@ function amountFor(ctx: SessionCtx, categoryName: string): string {
   return seed
     ? centsAmount(ctx, seed.amountMin, seed.amountMax)
     : centsAmount(ctx, FALLBACK_AMOUNT_MIN, FALLBACK_AMOUNT_MAX);
+}
+
+// The quick-add parser's very first step strips any standalone `income` or
+// `expense` token as an explicit type keyword, before whatever is left
+// becomes the transaction's description. Three of the pooled descriptions
+// ("Interest income", "Tutoring income", "Expense reimbursement") therefore do
+// NOT survive intact, so the bot cannot expect the toast to name the string it
+// typed. Mirroring that one rule here is what makes the expected toast text
+// exact — checked against the app's own `parseQuickAdd` over all 87 pooled
+// descriptions. Keep in lockstep with src/features/quick-add/lib/parser.ts.
+const QUICK_ADD_TYPE_KEYWORDS = ["income", "expense"];
+
+function parsedDescription(typed: string): string {
+  return typed
+    .split(/\s+/)
+    .filter((token) => !QUICK_ADD_TYPE_KEYWORDS.includes(token.toLowerCase()))
+    .join(" ");
 }
 
 function pickDistinct<T>(ctx: SessionCtx, items: T[], count: number): T[] {
@@ -724,7 +809,7 @@ async function runAddGoal(page: Page, ctx: SessionCtx): Promise<void> {
   }
   // The colour field has no free-text input on this form — only the ten preset
   // swatches, each labelled with its own hex.
-  const color = ctx.rng.pick(CATEGORY_PRESET_COLORS);
+  const color = ctx.rng.pick(SWATCH_PRESET_COLORS);
   await dialog.getByRole("button", { name: `Color ${color}`, exact: true }).click();
 
   await dialog.getByRole("button", { name: "Create goal", exact: true }).click();
@@ -802,8 +887,10 @@ async function runAddBudget(page: Page, ctx: SessionCtx): Promise<void> {
     return;
   }
 
-  // "Set" is identical on every row; the row's own input is the only anchor.
-  await input.locator("xpath=following-sibling::button[1]").click();
+  // "Set" is identical on every row, so it is scoped to the row that owns
+  // this input — by role within the row's container, not by DOM sibling
+  // order, which a wrapper element or a reordered Clear button would break.
+  await input.locator("xpath=..").getByRole("button", { name: "Set", exact: true }).click();
   await page
     .getByText(`Budget set for ${categoryName}`)
     .first()
@@ -929,7 +1016,7 @@ async function runAddCategory(page: Page, ctx: SessionCtx): Promise<void> {
   await selectOptionByText(page, dialog.locator('[data-slot="select-trigger"]'), ctx.rng.pick(CATEGORY_SCOPE_LABELS));
   // Of the three controls bound to `color`, the preset swatches are the only
   // one Playwright can drive cleanly (`fill()` does not work on input[type=color]).
-  const color = ctx.rng.pick(CATEGORY_PRESET_COLORS);
+  const color = ctx.rng.pick(SWATCH_PRESET_COLORS);
   await dialog.getByRole("button", { name: `Color ${color}`, exact: true }).click();
 
   await dialog.getByRole("button", { name: "Add category", exact: true }).click();
@@ -956,7 +1043,8 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
   await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
 
   const seed = ctx.rng.pick(ALL_CATEGORY_SEEDS);
-  const phrase = `${ctx.rng.pick(seed.descriptions)} ${amountFor(ctx, seed.name)}`;
+  const description = ctx.rng.pick(seed.descriptions);
+  const phrase = `${description} ${amountFor(ctx, seed.name)}`;
 
   if (ctx.rng.chance(ctx.abandonRate)) {
     // Typed the entry, closed the palette without pressing Enter. The palette
@@ -974,18 +1062,30 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
   // The palette saves on Enter and only when it has BOTH an amount and a
   // resolved category — and it fails silently when it does not (its own hint
   // text is misleading about which one is missing). Clicking a category chip
-  // removes the guesswork: the chips are the only buttons in this dialog, and
-  // they appear once the palette has lazily loaded the workspace's categories.
+  // removes the guesswork. The chips are the only buttons in this dialog: it
+  // is rendered with `showCloseButton={false}` and has no submit button.
   const chips = dialog.locator("button");
-  await chips.first().waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  // The chips only exist once the palette has lazily loaded the workspace's
+  // categories, so this waits — but swallows the timeout, because zero chips
+  // is a real (if rare) state the app can be in: they are one per category
+  // *matching the parsed type*. The count check below is what reports it, and
+  // it reports it as itself rather than as an opaque wait timeout.
+  await chips.first().waitFor({ state: "visible", timeout: QUICK_ADD_CHIPS_TIMEOUT_MS }).catch(() => undefined);
   const chipNames = (await chips.allInnerTexts()).map((text) => text.trim()).filter((text) => text.length > 0);
   if (chipNames.length === 0) {
-    throw new Error("the quick add palette offered no category chips");
+    throw new Error(`the quick add palette offered no category chips for "${phrase}"`);
   }
-  await dialog.getByRole("button", { name: ctx.rng.pick(chipNames), exact: true }).first().click();
+  const chipChoice = ctx.rng.pick(chipNames);
+  await dialog.getByRole("button", { name: chipChoice, exact: true }).first().click();
 
   await input.press("Enter");
-  await page.getByText(/^Added: /).first().waitFor({ state: "visible", timeout: TOAST_TIMEOUT_MS });
+  // Matched on the exact description this entry will be saved under, not on an
+  // `Added:` prefix — a toast left over from an earlier quick add would
+  // satisfy a prefix and let a silent non-save pass. The app names the
+  // transaction `parsed.description || category.name`, so an entry whose
+  // description was entirely type keywords is named after the chip instead.
+  const savedAs = parsedDescription(description) || chipChoice;
+  await page.getByText(`Added: ${savedAs}`).first().waitFor({ state: "visible", timeout: TOAST_TIMEOUT_MS });
 
   // The palette deliberately stays open after a save, for rapid entry.
   await page.keyboard.press("Escape");

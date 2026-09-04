@@ -217,10 +217,12 @@ export const CUSTOM_CATEGORY_COUNT_MAX = 3;
 
 // The exact 10 preset swatches offered by both `CategoryFormDialog`
 // (src/features/settings/components/category-manager.tsx) and
-// `GoalFormDialog` (src/features/goals/components/goal-form.tsx) — reused
-// here so a custom category's or a goal's color is one a real user could
-// actually have clicked.
-export const CATEGORY_PRESET_COLORS: string[] = [
+// `GoalFormDialog` (src/features/goals/components/goal-form.tsx). The two
+// palettes are byte-identical in the app, which is why one constant serves
+// both — and why it is named for the swatch row rather than for categories.
+// Reused here so a custom category's or a goal's color is one a real user
+// could actually have clicked.
+export const SWATCH_PRESET_COLORS: string[] = [
   "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#06b6d4",
   "#3b82f6", "#8b5cf6", "#ec4899", "#6b7280", "#84cc16",
 ];

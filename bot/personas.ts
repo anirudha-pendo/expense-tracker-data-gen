@@ -27,7 +27,7 @@ import {
   CUSTOM_CATEGORY_SEEDS,
   CUSTOM_CATEGORY_COUNT_MIN,
   CUSTOM_CATEGORY_COUNT_MAX,
-  CATEGORY_PRESET_COLORS,
+  SWATCH_PRESET_COLORS,
   EXPENSE_TRANSACTION_RATE,
   BUDGET_COUNT_MIN,
   BUDGET_COUNT_MAX,
@@ -683,7 +683,7 @@ function buildGoals(
 
   return chosenSeeds.map((seed) => {
     const targetAmount = roundToUnit(rng.int(seed.targetMin, seed.targetMax), AMOUNT_ROUNDING_UNIT);
-    const color = rng.pick(CATEGORY_PRESET_COLORS);
+    const color = rng.pick(SWATCH_PRESET_COLORS);
 
     const contributionCount = rng.int(GOAL_CONTRIBUTION_COUNT_MIN, GOAL_CONTRIBUTION_COUNT_MAX);
     const contributions: GoalContribution[] = [];
