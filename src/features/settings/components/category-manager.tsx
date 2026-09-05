@@ -142,6 +142,51 @@ function CategoryFormDialog({ open, defaultValues, onSubmit, onCancel }: Categor
   );
 }
 
+function CategoryList({
+  items,
+  onEdit,
+  onDelete,
+}: {
+  items: Category[];
+  onEdit: (cat: Category) => void;
+  onDelete: (cat: Category) => void;
+}) {
+  return (
+    <div className="flex flex-col">
+      {items.map((cat, idx) => (
+        <div key={cat.id}>
+          <div className="flex items-center justify-between py-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className="size-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+              <span className="text-sm">{cat.name}</span>
+              {cat.isDefault && (
+                <Badge variant="secondary" className="text-xs">Default</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className="size-7" onClick={() => onEdit(cat)}>
+                <Pencil className="size-3.5" />
+                <span className="sr-only">Edit</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-destructive hover:text-destructive"
+                onClick={() => onDelete(cat)}
+                disabled={cat.isDefault}
+              >
+                <Trash2 className="size-3.5" />
+                <span className="sr-only">Delete</span>
+              </Button>
+            </div>
+          </div>
+          {idx < items.length - 1 && <Separator />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CategoryManager() {
   const { workspace } = useAuthContext();
   const { categories, isLoading, reload } = useCategories(workspace!.id);
@@ -176,6 +221,13 @@ export function CategoryManager() {
     try {
       await updateCategory({ ...editingCat, ...values });
       await reload();
+      pendo?.track("category_updated", {
+        categoryName: values.name,
+        scope: values.scope,
+        color: values.color,
+        previousName: editingCat.name,
+        previousScope: editingCat.scope,
+      });
       setEditingCat(null);
       toast.success("Category updated");
     } catch {
@@ -210,43 +262,6 @@ export function CategoryManager() {
     );
   }
 
-  function CategoryList({ items }: { items: Category[] }) {
-    return (
-      <div className="flex flex-col">
-        {items.map((cat, idx) => (
-          <div key={cat.id}>
-            <div className="flex items-center justify-between py-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="size-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                <span className="text-sm">{cat.name}</span>
-                {cat.isDefault && (
-                  <Badge variant="secondary" className="text-xs">Default</Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="size-7" onClick={() => setEditingCat(cat)}>
-                  <Pencil className="size-3.5" />
-                  <span className="sr-only">Edit</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-destructive hover:text-destructive"
-                  onClick={() => setDeletingCat(cat)}
-                  disabled={cat.isDefault}
-                >
-                  <Trash2 className="size-3.5" />
-                  <span className="sr-only">Delete</span>
-                </Button>
-              </div>
-            </div>
-            {idx < items.length - 1 && <Separator />}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
@@ -260,13 +275,13 @@ export function CategoryManager() {
         <div>
           <h4 className="text-sm font-medium text-muted-foreground mb-2">Expense Categories</h4>
           <div className="rounded-lg border px-4">
-            <CategoryList items={expense} />
+            <CategoryList items={expense} onEdit={setEditingCat} onDelete={setDeletingCat} />
           </div>
         </div>
         <div>
           <h4 className="text-sm font-medium text-muted-foreground mb-2">Income Categories</h4>
           <div className="rounded-lg border px-4">
-            <CategoryList items={income} />
+            <CategoryList items={income} onEdit={setEditingCat} onDelete={setDeletingCat} />
           </div>
         </div>
       </div>

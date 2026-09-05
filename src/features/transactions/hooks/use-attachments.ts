@@ -57,6 +57,7 @@ export function useAttachments(workspaceId: string, transactionId: string | null
   }, [transactionId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload();
   }, [reload]);
 
@@ -107,9 +108,13 @@ export function useAttachments(workspaceId: string, transactionId: string | null
   const removeAttachment = useCallback(
     async (id: string) => {
       await deleteAttachment(id);
+      pendo?.track("attachment_deleted", {
+        attachmentId: id,
+        transactionId: transactionId ?? "",
+      });
       await reload();
     },
-    [reload]
+    [transactionId, reload]
   );
 
   const removeStagedFile = useCallback((id: string) => {

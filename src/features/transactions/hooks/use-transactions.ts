@@ -29,6 +29,14 @@ export async function notifyBudgetThreshold(
   } else {
     toast.warning(`Heads up: ${categoryName} is at ${percent}% of its monthly budget`);
   }
+  pendo?.track("budget_threshold_crossed", {
+    level: alert.level,
+    categoryId: alert.categoryId,
+    categoryName,
+    spent: alert.spent,
+    monthlyLimit: alert.monthlyLimit,
+    percentUsed: percent,
+  });
 }
 
 export interface TransactionWithCategory extends Transaction {
@@ -66,6 +74,7 @@ export function useTransactions(workspaceId: string): UseTransactionsReturn {
   }, [workspaceId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload();
   }, [reload]);
 
