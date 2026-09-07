@@ -145,10 +145,17 @@ export function useAuth(): AuthState & AuthActions {
   }, []);
 
   const signOut = useCallback(() => {
-    pendo?.clearSession();
+    // Local session first, analytics second: nothing about analytics may be
+    // able to keep a user signed in.
     clearSession();
     setUser(null);
     setWorkspace(null);
+    // Guarded by type, not by `?.`. The loader snippet in index.html
+    // pre-defines only initialize/identify/updateOptions/pageLoad/track/
+    // trackAgent — `clearSession` exists only once pendo.js has downloaded, so
+    // `pendo?.clearSession()` is `undefined()` and throws for anyone who signs
+    // out in the few hundred ms before that, or with the CDN blocked.
+    if (typeof pendo?.clearSession === "function") pendo.clearSession();
   }, []);
 
   const setActiveWorkspace = useCallback((ws: Workspace) => {
