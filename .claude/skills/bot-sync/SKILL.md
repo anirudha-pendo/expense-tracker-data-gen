@@ -6,10 +6,27 @@ description: Use after changing the expense-tracker app to find and fix drift in
 # Keeping the usage bot in sync with the app
 
 The bot in `bot/` drives the real deployed app with real DOM clicks. It matches
-elements by their visible text and their accessible roles, so it has no
-compile-time coupling to the app at all — an app change breaks it silently, and
-the first symptom is a failed run in CI hours later, or worse, a run that
-passes while quietly exercising less than it used to.
+elements by their visible text and their accessible roles, so almost every app
+change breaks it silently — the first symptom is a failed run in CI hours
+later, or worse, a run that passes while quietly exercising less than it used
+to.
+
+There is exactly one compile-time link, and it is deliberate: `bot/selftest.ts`
+imports `../src/lib/analytics`, and `bot/tsconfig.json` maps `@/*` to
+`../src/*`, so the bot's TypeScript program includes `src/lib/analytics.ts`,
+`src/types/index.ts` and `src/global.d.ts`. An app type change can therefore
+fail `cd bot && npm run typecheck` — that is the intended early warning, not a
+surprise. It does not extend to runtime: apart from the pure
+`buildIdentifyOptions` the selftest calls, the import is type-only.
+
+Three consequences of that link. App source is typechecked under the bot's
+compiler options, which differ from `tsconfig.app.json` (no DOM lib, no
+`verbatimModuleSyntax`, no `noUnusedLocals`). `Blob` — from `Attachment` in
+`src/types/index.ts` — resolves today only because `@types/node` declares it
+globally, so if a future app type pulls in a real DOM type, add
+`"lib": ["ES2022", "DOM"]` to `bot/tsconfig.json`. And `src/global.d.ts` is in
+the program, so bot code can reference the global `pendo` with no type error in
+a Node process where it does not exist.
 
 This skill closes that gap deliberately, after the app change rather than after
 the failure.

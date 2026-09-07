@@ -10,9 +10,15 @@
 // id changed between runs would look like a brand-new visitor every time —
 // silently breaking every retention/cohort chart this bot exists to produce.
 //
-// `bot/` never imports from `src/` (separate tsconfig, separate module
-// graph) — the record types below mirror `src/types/index.ts` field-for-field
-// but are declared locally.
+// The record types below mirror `src/types/index.ts` field-for-field and are
+// declared locally rather than imported, so a model change surfaces here as a
+// decision rather than as a silent recompile.
+//
+// That is a local choice, not a decoupling: `bot/selftest.ts` imports
+// `../src/lib/analytics` and `bot/tsconfig.json` maps `@/*` to `../src/*`, so
+// the bot's TypeScript program does include `src/lib/analytics.ts`,
+// `src/types/index.ts` and `src/global.d.ts`. An app type change can fail
+// `cd bot && npm run typecheck`, which is the intended early warning.
 
 import {
   makeRng,

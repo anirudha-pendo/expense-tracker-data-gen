@@ -5,10 +5,25 @@ deployed app to generate realistic Pendo analytics data.
 
 ## After changing the app, check the bot
 
-The bot has **no compile-time coupling to the app**. It finds elements by their
-visible text and accessible roles, so an app change breaks it silently — the
-first sign is a failed CI run hours later, or a run that passes while quietly
-exercising less of the app than it used to.
+The bot finds elements by their visible text and accessible roles, so **almost
+every app change breaks it silently** — the first sign is a failed CI run hours
+later, or a run that passes while quietly exercising less of the app than it
+used to.
+
+The one compile-time link is deliberate and narrow: `bot/selftest.ts` imports
+`../src/lib/analytics`, and `bot/tsconfig.json` maps `@/*` to `../src/*`, so the
+bot's TypeScript program includes `src/lib/analytics.ts`, `src/types/index.ts`
+and `src/global.d.ts`. An app type change can therefore fail `cd bot && npm run
+typecheck` — that is the intended early warning, not a surprise. It does not
+extend to runtime: apart from the pure `buildIdentifyOptions` the selftest
+calls, the import is type-only.
+
+Two things that link brings with it. App source is typechecked there under the
+bot's compiler options, which differ from `tsconfig.app.json` (no DOM lib, no
+`verbatimModuleSyntax`, no `noUnusedLocals`). And `Blob` — from `Attachment` in
+`src/types/index.ts` — resolves today only because `@types/node` declares it
+globally; if a future app type pulls in a real DOM type, add
+`"lib": ["ES2022", "DOM"]` to `bot/tsconfig.json`.
 
 So: after any change under `src/`, check whether `bot/` has fallen behind, and
 run the `bot-sync` skill if it has. It resolves the range since the bot was last
