@@ -36,9 +36,14 @@ bot never touches shows up as a dead feature in the analytics.
 ## Things that are easy to get wrong
 
 - **The Pendo account is the workspace.** There is no account entity and no
-  `accounts` store. Every member of one of the bot's 12 `ACCOUNTS` derives the
-  same workspace row — that sharing is the only reason 40 visitors group into 12
-  accounts. `bot/selftest.ts` enforces it. See `docs/superpowers/ui-map.md` §11.
+  `accounts` store. Every member of one of the bot's 12 `ACCOUNTS` derives a
+  workspace row whose `id`, `name`, `currency`, `locale` and `createdAt` are
+  identical — those five are exactly the account block, and that agreement is
+  the only reason 40 visitors group into 12 accounts. The row is not identical
+  beyond them: `userId` is the member's own. `bot/selftest.ts` enforces those
+  five fields and nothing wider. The bot's workspace rename is derived from the
+  account for the same reason — one member renaming rewrites the shared account
+  for all of them. See `docs/superpowers/ui-map.md` §11.
 - **`src/lib/analytics.ts` owns the Pendo payload.** Do not hand-roll an
   identify literal at a call site.
 - **No test framework exists in this repo.** `bot/selftest.ts` is the only
