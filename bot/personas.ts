@@ -404,8 +404,12 @@ export const ACCOUNTS: Account[] = [
  * `who` is only for the error text — the identity generator calls this while
  * PERSONAS is still being built, so there is no persona to name yet.
  */
+function findAccount(accountId: string): Account | undefined {
+  return ACCOUNTS.find((candidate) => candidate.id === accountId);
+}
+
 function accountById(accountId: string, who: string): Account {
-  const account = ACCOUNTS.find((candidate) => candidate.id === accountId);
+  const account = findAccount(accountId);
   if (account === undefined) {
     throw new Error(`persona "${who}" has accountId "${accountId}", which is not in ACCOUNTS`);
   }
@@ -415,6 +419,19 @@ function accountById(accountId: string, who: string): Account {
 /** The ACCOUNTS row a persona belongs to. */
 export function accountFor(persona: Persona): Account {
   return accountById(persona.accountId, persona.username);
+}
+
+/**
+ * Like `accountFor`, but `undefined` instead of a throw when `persona.accountId`
+ * isn't in ACCOUNTS. There is exactly one persona this is for: `bot/run.ts`
+ * hands a brand-new visitor a synthetic accountId (`acct-new-visitor`) on
+ * purpose, because that visitor's workspace is shared with nobody and there is
+ * no account row to point it at. `accountFor` keeps throwing for everyone
+ * else — a SEEDED persona with an unknown accountId is a real bug, not a
+ * design choice, and must still fail loudly.
+ */
+export function accountForOrUndefined(persona: Persona): Account | undefined {
+  return findAccount(persona.accountId);
 }
 
 // =============================================================================

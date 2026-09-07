@@ -68,7 +68,7 @@ import {
   makeRng,
   type Rng,
 } from "./config";
-import { ARCHETYPES, accountFor, type ActionName, type Persona } from "./personas";
+import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
   CUSTOM_CATEGORY_SEEDS,
@@ -553,7 +553,7 @@ function pickDistinct<T>(ctx: SessionCtx, items: T[], count: number): T[] {
 
 /**
  * The rename `updateWorkspace` is about to perform, derived from the ACCOUNT
- * and never from the persona.
+ * and never from the persona — except for a brand-new visitor, who has none.
  *
  * The workspace IS the Pendo account, so a rename does not stay local: it
  * rewrites the shared account's `name`, and the rolls below it rewrite
@@ -565,21 +565,33 @@ function pickDistinct<T>(ctx: SessionCtx, items: T[], count: number): T[] {
  * segmenting accounts by currency or locale stops being reliable. Off the
  * account, whichever member performs the rename writes identical values.
  *
+ * A brand-new visitor (see `bot/run.ts`) carries a synthetic accountId that is
+ * deliberately not in ACCOUNTS, because their workspace starts out shared with
+ * nobody — there is no account to keep consistent, so the account-derived path
+ * is meaningless for them, and calling `accountFor` would throw a guard that
+ * exists to catch a SEEDED persona's real bug, not this intentional case. That
+ * one persona falls back to the original persona-derived rename instead; every
+ * seeded persona still resolves to a real account and takes the branch above,
+ * byte-identical to before.
+ *
  * `existingName` is what is currently in the input. react-hook-form keeps
  * "Save changes" disabled until the field is dirty, so the new name has to
- * differ from it: the candidates are walked in one account-derived rotation
- * and the first one that differs wins. Members therefore agree even when they
- * are at different points in that rotation, and the returned PRNG — the
- * account's, freshly seeded, so the draw order is the same for every member —
- * is what the currency and locale choices come off.
+ * differ from it: the candidates are walked in one rotation and the first one
+ * that differs wins. Members therefore agree even when they are at different
+ * points in that rotation, and the returned PRNG — freshly seeded, so the draw
+ * order is the same for every member — is what the currency and locale
+ * choices come off.
  *
  * Pure and exported so `bot/selftest.ts` can prove two members of one account
- * agree without opening a browser.
+ * agree, and that the new-visitor fallback never throws, without opening a
+ * browser.
  */
 export function planWorkspaceRename(persona: Persona, existingName: string): { name: string; rng: Rng } {
-  const account = accountFor(persona);
-  const rng = makeRng(`${account.id}:updateWorkspace`);
-  const candidates = WORKSPACE_NAME_TEMPLATES.map((template) => template.replace("{name}", account.name));
+  const account = accountForOrUndefined(persona);
+  const seedKey = account !== undefined ? account.id : persona.id;
+  const nameSource = account !== undefined ? account.name : persona.displayName.split(" ")[0];
+  const rng = makeRng(`${seedKey}:updateWorkspace`);
+  const candidates = WORKSPACE_NAME_TEMPLATES.map((template) => template.replace("{name}", nameSource));
   const offset = rng.int(0, candidates.length - 1);
   const name = candidates
     .map((_, index) => candidates[(offset + index) % candidates.length])

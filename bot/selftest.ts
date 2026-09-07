@@ -11,6 +11,7 @@ import {
   BASE_SESSIONS_PER_RUN,
   sessionsForRegion,
   makeRng,
+  NEW_VISITOR_ARCHETYPE,
   type Region,
 } from "./config";
 import {
@@ -285,6 +286,41 @@ check("two members of one account plan the same workspace rename", () => {
   }
 
   assert.ok(pairsChecked >= 9, `expected at least 9 multi-member accounts to check, got ${pairsChecked}`);
+});
+
+check("planWorkspaceRename falls back to a persona-derived rename for a persona whose accountId isn't in ACCOUNTS", () => {
+  // Mirrors the shape `newVisitorPersona` in bot/run.ts builds: a brand-new
+  // visitor's `accountId` is the synthetic "acct-new-visitor", deliberately
+  // absent from ACCOUNTS, because that visitor's workspace starts out shared
+  // with nobody. `updateWorkspace` is in NEW_VISITOR_ACTIONS, so a session
+  // like this one really can reach `planWorkspaceRename`.
+  const newVisitor: Persona = {
+    id: "new-visitor-0",
+    username: "aria_hall12",
+    email: "aria_hall12@example.com",
+    password: "not-a-real-password",
+    displayName: "Aria Hall",
+    accountId: "acct-new-visitor",
+    region: "US",
+    archetype: NEW_VISITOR_ARCHETYPE,
+  };
+  assert.ok(
+    !ACCOUNTS.some((account) => account.id === newVisitor.accountId),
+    "this check only means something while acct-new-visitor stays out of ACCOUNTS",
+  );
+
+  const existing = "Aria Hall's Finances";
+  let plan: { name: string; rng: { next: () => number } } | undefined;
+  assert.doesNotThrow(() => {
+    plan = planWorkspaceRename(newVisitor, existing);
+  }, "a persona with an unknown accountId must get a rename plan, not a throw");
+  assert.ok(plan !== undefined);
+  assert.notStrictEqual(plan.name, existing, "the rename must change the name, or \"Save changes\" stays disabled");
+
+  // Same persona, same starting name, twice — the fallback still has to be
+  // pure and deterministic, not a fresh roll every call.
+  const replan = planWorkspaceRename(newVisitor, existing);
+  assert.strictEqual(replan.name, plan.name, "the fallback must be deterministic for the same persona and starting name");
 });
 
 check(
