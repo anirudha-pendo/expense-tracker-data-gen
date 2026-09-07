@@ -109,15 +109,50 @@ framework.
 ## Step 6 — Verify against a running app
 
 Static reasoning cannot tell you a selector still resolves. One real session
-can.
+can — but only if a session actually runs, and the default invocation does not
+guarantee that. Read this whole step before running anything.
+
+Prerequisites, once per checkout (`bot/README.md` steps 2 and 3 — without them
+this fails outright):
+
+```bash
+cd bot && npm install && npx playwright install chromium
+```
+
+Then start the dev server from the repo root and **wait for the port to accept
+connections** before launching the bot:
 
 ```bash
 npm run dev &
+until curl -sf http://localhost:5173 > /dev/null; do sleep 1; done
 cd bot && APP_URL=http://localhost:5173 BOT_SESSIONS=1 HEADLESS=true npm run run
 ```
 
-Read the run summary it prints. Actions that error are named there. A session
-that completes with no errored actions is the proof; anything else is a finding.
+`BOT_SESSIONS` is a **ceiling, not a count** — `bot/README.md` says so. The
+show-up gate can leave that single slot unfilled, in which case `bot/run.ts`
+prints
+
+```
+No sessions planned for this hour (requested 1) — nothing to do.
+```
+
+and exits **0**. That line means **re-run, not pass**: no browser opened and
+nothing was verified. Re-run, or raise `BOT_SESSIONS`, until a session happens.
+
+The proof is the run summary, and it needs all of:
+
+- `planned` non-zero — a session was actually planned;
+- `actions performed` non-zero — it actually clicked things;
+- `action failures 0` and no `failed sessions:` block.
+
+Anything else is a finding.
+
+One gap this does not close on its own: the new-visitor sign-up walk (and the
+workspace-setup form after it) is reached only on a `NEW_VISITOR_RATE` share of
+slots, which is 0.15. If your change touched either of those forms, temporarily
+set `NEW_VISITOR_RATE = 1` in `bot/config.ts`, run, then put it back and confirm
+`git diff bot/config.ts` is empty. Doing this deliberately is how this branch's
+own sign-up change was verified.
 
 Stop the dev server afterwards.
 
