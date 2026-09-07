@@ -20,6 +20,7 @@ import {
   PERSONAS,
   buildSeedData,
   type Archetype,
+  type SeedData,
 } from "./personas";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 
@@ -195,6 +196,38 @@ check("buildSeedData on two different personas yields different user ids", () =>
     userIds.size,
     PERSONAS.length,
     "buildSeedData produced duplicate user ids across distinct personas",
+  );
+});
+
+check("every persona in an account derives the same workspace id, name, currency and locale", () => {
+  const firstByAccount = new Map<string, SeedData["workspace"]>();
+  const nameById = new Map(ACCOUNTS.map((account) => [account.id, account.name]));
+
+  for (const persona of PERSONAS) {
+    const { workspace } = buildSeedData(persona, TEST_NOW);
+    assert.strictEqual(
+      workspace.name,
+      nameById.get(persona.accountId),
+      `${persona.username}'s workspace is named "${workspace.name}", not after its account`,
+    );
+
+    const first = firstByAccount.get(persona.accountId);
+    if (!first) {
+      firstByAccount.set(persona.accountId, workspace);
+      continue;
+    }
+    // The workspace IS the Pendo account. Members drifting apart here does not
+    // throw anywhere — it just silently splits one account into several, and
+    // the only symptom is an account count that is quietly too high.
+    assert.strictEqual(workspace.id, first.id, `${persona.username} is in ${persona.accountId} but derives workspace ${workspace.id}, not ${first.id}`);
+    assert.strictEqual(workspace.currency, first.currency, `${persona.username} disagrees with its account on currency`);
+    assert.strictEqual(workspace.locale, first.locale, `${persona.username} disagrees with its account on locale`);
+  }
+
+  assert.strictEqual(
+    firstByAccount.size,
+    ACCOUNTS.length,
+    `expected ${ACCOUNTS.length} distinct workspaces, one per account, got ${firstByAccount.size}`,
   );
 });
 
