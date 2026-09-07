@@ -21,6 +21,7 @@ import {
   buildSeedData,
   type Archetype,
 } from "./personas";
+import { buildIdentifyOptions } from "../src/lib/analytics";
 
 let checksPassed = 0;
 
@@ -264,6 +265,43 @@ check("every archetype gives signOut a non-zero (but small) weight", () => {
     const weights = ACTION_WEIGHTS[archetype];
     assert.ok(weights.signOut > 0, `${archetype}.signOut should be non-zero`);
   }
+});
+
+// --- Analytics payload -------------------------------------------------------
+
+check("buildIdentifyOptions carries the visitor's email and the workspace as the account", () => {
+  const { user, workspace } = buildSeedData(PERSONAS[0], TEST_NOW);
+  const options = buildIdentifyOptions(user, workspace);
+
+  assert.strictEqual(options.visitor.id, user.id);
+  assert.strictEqual(options.visitor.email, user.email);
+  assert.strictEqual(options.visitor.username, user.username);
+  assert.strictEqual(options.visitor.full_name, user.displayName);
+
+  assert.ok(options.account, "a user with a workspace must send an account");
+  assert.strictEqual(options.account.id, workspace.id);
+  assert.strictEqual(options.account.name, workspace.name);
+  assert.strictEqual(options.account.currency, workspace.currency);
+  assert.strictEqual(options.account.locale, workspace.locale);
+  assert.strictEqual(options.account.createdAt, workspace.createdAt);
+});
+
+check("buildIdentifyOptions omits the account entirely when there is no workspace", () => {
+  const { user } = buildSeedData(PERSONAS[0], TEST_NOW);
+  const options = buildIdentifyOptions(user, null);
+  assert.ok(
+    !("account" in options),
+    "between sign-up and workspace setup there is no account — the key must be absent, not empty",
+  );
+});
+
+check("buildIdentifyOptions omits the email key for a user that has none", () => {
+  const { user, workspace } = buildSeedData(PERSONAS[0], TEST_NOW);
+  const options = buildIdentifyOptions({ ...user, email: undefined }, workspace);
+  assert.ok(
+    !("email" in options.visitor),
+    "an absent email must not become `email: undefined` — Pendo would store the key and the visitor would read as having a blank email",
+  );
 });
 
 // --- Summary -----------------------------------------------------------------
