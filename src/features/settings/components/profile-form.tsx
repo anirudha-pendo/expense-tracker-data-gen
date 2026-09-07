@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Avatar from "boring-avatars";
 import { updateUser } from "@/lib/db/repositories/users.repo";
+import { updateOptions } from "@/lib/analytics";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
+import type { User } from "@/types";
 
 const profileSchema = z.object({
   displayName: z.string().min(1, "Display name is required").max(50),
@@ -17,7 +19,7 @@ const profileSchema = z.object({
 type ProfileFormValues = z.infer<typeof profileSchema>;
 
 export function ProfileForm() {
-  const { user, refreshUser } = useAuthContext();
+  const { user, workspace, refreshUser } = useAuthContext();
 
   const {
     register,
@@ -38,8 +40,15 @@ export function ProfileForm() {
         .toUpperCase()
         .slice(0, 2);
 
-      await updateUser({ ...user, displayName: values.displayName, avatarInitials: initials });
+      const updated: User = { ...user, displayName: values.displayName, avatarInitials: initials };
+      await updateUser(updated);
       await refreshUser();
+      // Built from `updated`, not from `user`: `refreshUser()` sets React state
+      // asynchronously, so the `user` in this scope is still the old record and
+      // would re-send the old `full_name`. `updateOptions`, not `identify`, for
+      // the same reason the workspace form uses it — the visitor is already in
+      // flight and only one field moved.
+      updateOptions(updated, workspace);
       pendo?.track("profile_updated", {
         fieldChanged: "displayName",
       });

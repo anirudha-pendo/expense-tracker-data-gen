@@ -385,7 +385,8 @@ Two fields are conditional:
 | Sign-in (`useAuth.signIn`) | `identify` | Yes |
 | Workspace created (`WorkspaceSetupPage`) | `identify` | Yes — this is where a fresh sign-up gains one |
 | Workspace renamed or money settings changed (Settings → Workspace) | `updateOptions` | Yes. `updateOptions`, not `identify`, so a rename does not start a new session |
-| Sign-out (`useAuth.signOut`) | `pendo?.clearSession()` | — |
+| Display name changed (Settings → Profile) | `updateOptions` | Yes, when the user has a workspace. The visitor's `full_name` moved; the account block is unchanged and re-sent as-is |
+| Sign-out (`useAuth.signOut`) | `clearSession()`, guarded with `typeof` | — |
 
 The bot needs no code of its own for any of this: it seeds workspaces that
 already agree per account, and `updateProfile` / `updateWorkspace` are already
