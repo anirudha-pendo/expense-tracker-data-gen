@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { BpBox } from "@/shared/components/bp-box";
 import { createWorkspace } from "@/lib/db/repositories/workspaces.repo";
 import { seedDefaultCategories } from "@/lib/db/repositories/categories.repo";
+import { identify } from "@/lib/analytics";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
 import { WorkspaceSetupForm, type WorkspaceFormValues } from "../components/workspace-setup-form";
 import type { Workspace } from "@/types";
@@ -25,6 +26,9 @@ export function WorkspaceSetupPage() {
       await createWorkspace(workspace);
       await seedDefaultCategories(workspace.id);
       setActiveWorkspace(workspace);
+      // The moment a fresh sign-up gains an account. `signUp` identified this
+      // visitor without one, because at that point there was none.
+      identify(user, workspace);
       pendo?.track("workspace_created", {
         currency: values.currency,
         locale: values.locale,

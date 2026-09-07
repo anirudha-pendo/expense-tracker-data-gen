@@ -11,6 +11,7 @@ import {
   BASE_SESSIONS_PER_RUN,
   sessionsForRegion,
   makeRng,
+  NEW_VISITOR_ARCHETYPE,
   type Region,
 } from "./config";
 import {
@@ -20,7 +21,11 @@ import {
   PERSONAS,
   buildSeedData,
   type Archetype,
+  type Persona,
+  type SeedData,
 } from "./personas";
+import { planWorkspaceRename } from "./actions";
+import { buildIdentifyOptions } from "../src/lib/analytics";
 
 let checksPassed = 0;
 
@@ -197,6 +202,127 @@ check("buildSeedData on two different personas yields different user ids", () =>
   );
 });
 
+check("every persona in an account derives the same workspace id, name, currency, locale and createdAt", () => {
+  const firstByAccount = new Map<string, SeedData["workspace"]>();
+  const nameById = new Map(ACCOUNTS.map((account) => [account.id, account.name]));
+
+  for (const persona of PERSONAS) {
+    const { workspace } = buildSeedData(persona, TEST_NOW);
+    assert.strictEqual(
+      workspace.name,
+      nameById.get(persona.accountId),
+      `${persona.username}'s workspace is named "${workspace.name}", not after its account`,
+    );
+
+    const first = firstByAccount.get(persona.accountId);
+    if (!first) {
+      firstByAccount.set(persona.accountId, workspace);
+      continue;
+    }
+    // The workspace IS the Pendo account. Members drifting apart here does not
+    // throw anywhere — it just silently splits one account into several, and
+    // the only symptom is an account count that is quietly too high.
+    assert.strictEqual(workspace.id, first.id, `${persona.username} is in ${persona.accountId} but derives workspace ${workspace.id}, not ${first.id}`);
+    assert.strictEqual(workspace.currency, first.currency, `${persona.username} disagrees with its account on currency`);
+    assert.strictEqual(workspace.locale, first.locale, `${persona.username} disagrees with its account on locale`);
+    // `createdAt` is checked for the same reason as the other three, and it is
+    // the easiest one to get wrong: it is the only account field derived from a
+    // date rather than copied off the ACCOUNTS row. Pendo keeps the last write
+    // for account metadata, so members disagreeing here makes the account's age
+    // flip between runs depending only on who identified most recently.
+    assert.strictEqual(workspace.createdAt, first.createdAt, `${persona.username} disagrees with its account on createdAt (${workspace.createdAt} vs ${first.createdAt})`);
+  }
+
+  assert.strictEqual(
+    firstByAccount.size,
+    ACCOUNTS.length,
+    `expected ${ACCOUNTS.length} distinct workspaces, one per account, got ${firstByAccount.size}`,
+  );
+});
+
+check("two members of one account plan the same workspace rename", () => {
+  const membersByAccount = new Map<string, Persona[]>();
+  for (const persona of PERSONAS) {
+    const members = membersByAccount.get(persona.accountId) ?? [];
+    members.push(persona);
+    membersByAccount.set(persona.accountId, members);
+  }
+
+  let pairsChecked = 0;
+  for (const [accountId, members] of membersByAccount) {
+    if (members.length < 2) continue;
+    pairsChecked++;
+
+    // Both start from the seeded workspace name, which is the account's name.
+    const seeded = buildSeedData(members[0], TEST_NOW).workspace.name;
+    const first = planWorkspaceRename(members[0], seeded);
+    const second = planWorkspaceRename(members[members.length - 1], seeded);
+
+    // The workspace IS the shared Pendo account, so a rename by one member
+    // rewrites `account.name`, `account.currency` and `account.locale` for
+    // every other member. Two members disagreeing here is the account's
+    // descriptive fields thrashing on every run — nothing throws.
+    assert.strictEqual(
+      first.name,
+      second.name,
+      `${accountId}: ${members[0].username} renames to "${first.name}" but ${members[members.length - 1].username} renames to "${second.name}"`,
+    );
+    assert.notStrictEqual(first.name, seeded, `${accountId}: the rename must change the name, or "Save changes" stays disabled`);
+
+    // The currency and locale rolls draw from the returned PRNG, so those have
+    // to agree draw-for-draw as well, not just the name.
+    const draws = (rng: { next: () => number }) => Array.from({ length: 6 }, () => rng.next());
+    assert.deepStrictEqual(draws(first.rng), draws(second.rng), `${accountId}: members disagree on the currency/locale draws`);
+
+    // And once one member has renamed, the next member to rename lands on the
+    // same follow-up name rather than reverting to their own persona's.
+    const afterFirst = planWorkspaceRename(members[0], first.name);
+    const afterSecond = planWorkspaceRename(members[members.length - 1], first.name);
+    assert.strictEqual(
+      afterFirst.name,
+      afterSecond.name,
+      `${accountId}: members disagree on the rename that follows "${first.name}"`,
+    );
+  }
+
+  assert.ok(pairsChecked >= 9, `expected at least 9 multi-member accounts to check, got ${pairsChecked}`);
+});
+
+check("planWorkspaceRename falls back to a persona-derived rename for a persona whose accountId isn't in ACCOUNTS", () => {
+  // Mirrors the shape `newVisitorPersona` in bot/run.ts builds: a brand-new
+  // visitor's `accountId` is the synthetic "acct-new-visitor", deliberately
+  // absent from ACCOUNTS, because that visitor's workspace starts out shared
+  // with nobody. `updateWorkspace` is in NEW_VISITOR_ACTIONS, so a session
+  // like this one really can reach `planWorkspaceRename`.
+  const newVisitor: Persona = {
+    id: "new-visitor-0",
+    username: "aria_hall12",
+    email: "aria_hall12@example.com",
+    password: "not-a-real-password",
+    displayName: "Aria Hall",
+    accountId: "acct-new-visitor",
+    region: "US",
+    archetype: NEW_VISITOR_ARCHETYPE,
+  };
+  assert.ok(
+    !ACCOUNTS.some((account) => account.id === newVisitor.accountId),
+    "this check only means something while acct-new-visitor stays out of ACCOUNTS",
+  );
+
+  const existing = "Aria Hall's Finances";
+  let plan: { name: string; rng: { next: () => number } } | undefined;
+  assert.doesNotThrow(() => {
+    plan = planWorkspaceRename(newVisitor, existing);
+  }, "a persona with an unknown accountId must get a rename plan, not a throw");
+  assert.ok(plan !== undefined);
+  assert.notStrictEqual(plan.name, existing, "the rename must change the name, or \"Save changes\" stays disabled");
+
+  // Same persona, same starting name, twice — the fallback still has to be
+  // pure and deterministic, not a fresh roll every call.
+  const replan = planWorkspaceRename(newVisitor, existing);
+  assert.strictEqual(replan.name, plan.name, "the fallback must be deterministic for the same persona and starting name");
+});
+
 check(
   "every transaction's categoryId resolves to one of the workspace's own categories, and every budget's categoryId does too",
   () => {
@@ -264,6 +390,43 @@ check("every archetype gives signOut a non-zero (but small) weight", () => {
     const weights = ACTION_WEIGHTS[archetype];
     assert.ok(weights.signOut > 0, `${archetype}.signOut should be non-zero`);
   }
+});
+
+// --- Analytics payload -------------------------------------------------------
+
+check("buildIdentifyOptions carries the visitor's email and the workspace as the account", () => {
+  const { user, workspace } = buildSeedData(PERSONAS[0], TEST_NOW);
+  const options = buildIdentifyOptions(user, workspace);
+
+  assert.strictEqual(options.visitor.id, user.id);
+  assert.strictEqual(options.visitor.email, user.email);
+  assert.strictEqual(options.visitor.username, user.username);
+  assert.strictEqual(options.visitor.full_name, user.displayName);
+
+  assert.ok(options.account, "a user with a workspace must send an account");
+  assert.strictEqual(options.account.id, workspace.id);
+  assert.strictEqual(options.account.name, workspace.name);
+  assert.strictEqual(options.account.currency, workspace.currency);
+  assert.strictEqual(options.account.locale, workspace.locale);
+  assert.strictEqual(options.account.createdAt, workspace.createdAt);
+});
+
+check("buildIdentifyOptions omits the account entirely when there is no workspace", () => {
+  const { user } = buildSeedData(PERSONAS[0], TEST_NOW);
+  const options = buildIdentifyOptions(user, null);
+  assert.ok(
+    !("account" in options),
+    "between sign-up and workspace setup there is no account — the key must be absent, not empty",
+  );
+});
+
+check("buildIdentifyOptions omits the email key for a user that has none", () => {
+  const { user, workspace } = buildSeedData(PERSONAS[0], TEST_NOW);
+  const options = buildIdentifyOptions({ ...user, email: undefined }, workspace);
+  assert.ok(
+    !("email" in options.visitor),
+    "an absent email must not become `email: undefined` — Pendo would store the key and the visitor would read as having a blank email",
+  );
 });
 
 // --- Summary -----------------------------------------------------------------

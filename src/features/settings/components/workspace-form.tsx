@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { updateWorkspace } from "@/lib/db/repositories/workspaces.repo";
+import { updateOptions } from "@/lib/analytics";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
 import type { Workspace } from "@/types";
 
@@ -42,7 +43,7 @@ const LOCALES = [
 ];
 
 export function WorkspaceForm() {
-  const { workspace, setActiveWorkspace } = useAuthContext();
+  const { user, workspace, setActiveWorkspace } = useAuthContext();
 
   const {
     register,
@@ -65,6 +66,10 @@ export function WorkspaceForm() {
       const updated: Workspace = { ...workspace, ...values };
       await updateWorkspace(updated);
       setActiveWorkspace(updated);
+      // `updateOptions`, not `identify`: the account is already in flight and
+      // only its name or money settings moved. Identifying again would start
+      // a fresh session on a rename.
+      if (user) updateOptions(user, updated);
       pendo?.track("workspace_settings_updated", {
         currency: values.currency,
         locale: values.locale,

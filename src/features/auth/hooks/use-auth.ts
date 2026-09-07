@@ -4,6 +4,7 @@ import { getDB } from "@/lib/db/client";
 import { createUser, getUserByEmail, getUserByUsername } from "@/lib/db/repositories/users.repo";
 import { getWorkspacesByUserId } from "@/lib/db/repositories/workspaces.repo";
 import { clearSession, getSession, saveSession } from "@/lib/session";
+import { identify } from "@/lib/analytics";
 import type { Session, User, Workspace } from "@/types";
 
 interface AuthState {
@@ -57,20 +58,18 @@ export function useAuth(): AuthState & AuthActions {
         return;
       }
       setUser(storedUser);
-      pendo.identify({
-        visitor: {
-          id: storedUser.id,
-          full_name: storedUser.displayName,
-          username: storedUser.username,
-          avatarInitials: storedUser.avatarInitials,
-          createdAt: storedUser.createdAt,
-        },
-      });
 
+      let storedWorkspace: Workspace | undefined;
       if (session.workspaceId) {
-        const storedWorkspace = await db.get("workspaces", session.workspaceId);
+        storedWorkspace = await db.get("workspaces", session.workspaceId);
         if (storedWorkspace) setWorkspace(storedWorkspace);
       }
+
+      // After the workspace read, not before it. This is the returning-user
+      // path and it is the common one — identifying first reported every
+      // returning visitor as account-less for the whole of their session,
+      // because nothing identified them again once the workspace arrived.
+      identify(storedUser, storedWorkspace ?? null);
     } catch {
       clearSession();
     } finally {
@@ -115,15 +114,9 @@ export function useAuth(): AuthState & AuthActions {
 
     await createUser(newUser);
     setUser(newUser);
-    pendo.identify({
-      visitor: {
-        id: newUser.id,
-        full_name: newUser.displayName,
-        username: newUser.username,
-        avatarInitials: newUser.avatarInitials,
-        createdAt: newUser.createdAt,
-      },
-    });
+    // No workspace yet — /setup-workspace is the next screen, and the account
+    // is attached there.
+    identify(newUser, null);
     const session: Session = { userId: newUser.id, workspaceId: "" };
     saveSession(session);
   }, []);
@@ -142,15 +135,7 @@ export function useAuth(): AuthState & AuthActions {
     const workspaces = await getWorkspacesByUserId(storedUser.id);
     const activeWorkspace = workspaces[0] ?? null;
     setWorkspace(activeWorkspace);
-    pendo.identify({
-      visitor: {
-        id: storedUser.id,
-        full_name: storedUser.displayName,
-        username: storedUser.username,
-        avatarInitials: storedUser.avatarInitials,
-        createdAt: storedUser.createdAt,
-      },
-    });
+    identify(storedUser, activeWorkspace);
 
     const session: Session = {
       userId: storedUser.id,
@@ -160,10 +145,17 @@ export function useAuth(): AuthState & AuthActions {
   }, []);
 
   const signOut = useCallback(() => {
-    pendo.clearSession();
+    // Local session first, analytics second: nothing about analytics may be
+    // able to keep a user signed in.
     clearSession();
     setUser(null);
     setWorkspace(null);
+    // Guarded by type, not by `?.`. The loader snippet in index.html
+    // pre-defines only initialize/identify/updateOptions/pageLoad/track/
+    // trackAgent — `clearSession` exists only once pendo.js has downloaded, so
+    // `pendo?.clearSession()` is `undefined()` and throws for anyone who signs
+    // out in the few hundred ms before that, or with the CDN blocked.
+    if (typeof pendo?.clearSession === "function") pendo.clearSession();
   }, []);
 
   const setActiveWorkspace = useCallback((ws: Workspace) => {

@@ -356,6 +356,69 @@ Deterministic token parser: strips an explicit `income`/`expense` keyword, then 
 
 ---
 
+## 11. Analytics — what the page sends to Pendo
+
+Built in one place, `src/lib/analytics.ts`. Nothing else constructs this payload.
+
+```
+visitor: { id, full_name, username, email, avatarInitials, createdAt }
+account: { id, name, currency, locale, createdAt }
+```
+
+**The account is the workspace.** There is no separate account entity in the app
+and no `accounts` object store. `account.id` is `workspace.id`, which is why
+`bot/personas.ts` derives one shared workspace row per `accountId` — that
+sharing is the only thing that makes 40 seeded visitors group into 12 Pendo
+accounts. Break it and the accounts silently become 40 singletons.
+
+Two fields are conditional:
+
+- `visitor.email` — the key is **absent** for users created before email
+  existed. Never `undefined`, never `""`.
+- `account` — the whole block is **absent** when the user has no workspace,
+  which is every moment between sign-up and workspace setup.
+
+| Moment | Call | Account included? |
+|---|---|---|
+| Session bootstrap for a returning user (`useAuth.loadSession`) | `identify` | Yes, when the session names a workspace. Fires after the workspace read, not before |
+| Sign-up (`useAuth.signUp`) | `identify` | No — none exists yet |
+| Sign-in (`useAuth.signIn`) | `identify` | Yes |
+| Workspace created (`WorkspaceSetupPage`) | `identify` | Yes — this is where a fresh sign-up gains one |
+| Workspace renamed or money settings changed (Settings → Workspace) | `updateOptions` | Yes. `updateOptions`, not `identify`, so a rename does not start a new session |
+| Display name changed (Settings → Profile) | `updateOptions` | Yes, when the user has a workspace. The visitor's `full_name` moved; the account block is unchanged and re-sent as-is |
+| Sign-out (`useAuth.signOut`) | `clearSession()`, guarded with `typeof` | — |
+
+### Which of those the bot's walk actually reaches
+
+Four of the seven, on an ordinary run:
+
+- **Session bootstrap** — every returning session starts here, and it is the
+  only moment that carries the account on a returning visitor's first call.
+- **Display name changed** — `updateProfile` is in the action mix of every
+  archetype except `churning`, which weights it 0.
+- **Workspace renamed** — `updateWorkspace`, same weights. The name, currency
+  and locale it writes are derived from the account, not the persona
+  (`planWorkspaceRename` in `bot/actions.ts`), because this call rewrites the
+  shared account for every member of it.
+- **Sign-out** — `signOut` carries a non-zero weight in every archetype, and
+  `bot/selftest.ts` enforces that.
+
+Three are **not** reached by an ordinary run, and saying otherwise is how a
+broken selector on them survives a green run:
+
+- **Sign-in.** Returning personas resume from a seeded `localStorage` session,
+  so `useAuth.signIn` never runs and the email sign-in path stays unexercised.
+- **Sign-up** and **workspace created.** Both are on the new-visitor walk, which
+  is reached only on a `NEW_VISITOR_RATE` share of a run's slots — 0.15. To
+  exercise them on purpose, raise that constant in `bot/config.ts` for one run
+  and revert it afterwards; the `bot-sync` skill's Step 6 spells this out.
+
+The account grouping itself needs no bot code at run time: the seeded workspaces
+already agree per account, and `bot/selftest.ts` enforces that agreement on
+`id`, `name`, `currency`, `locale` and `createdAt`.
+
+---
+
 ## Navigation — `src/shared/components/app-nav.tsx`
 
 ### `AppNav` — actually rendered (inside `AppLayout`, every protected page)

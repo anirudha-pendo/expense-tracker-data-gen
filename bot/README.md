@@ -10,6 +10,12 @@ what it is. It exists so the app has realistic usage data — daily traffic
 patterns, returning users, funnels people abandon halfway — instead of an
 empty dashboard.
 
+What the app reports to Pendo — the visitor and account fields, and which
+moment fires which call — is documented in `docs/superpowers/ui-map.md` §11.
+The short version: the Pendo account **is** the workspace, and every member of
+one of the 12 `ACCOUNTS` derives the same workspace row. `bot/selftest.ts`
+enforces that.
+
 ## Running it on your machine
 
 Do these in order.
