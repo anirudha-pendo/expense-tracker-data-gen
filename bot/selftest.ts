@@ -199,7 +199,7 @@ check("buildSeedData on two different personas yields different user ids", () =>
   );
 });
 
-check("every persona in an account derives the same workspace id, name, currency and locale", () => {
+check("every persona in an account derives the same workspace id, name, currency, locale and createdAt", () => {
   const firstByAccount = new Map<string, SeedData["workspace"]>();
   const nameById = new Map(ACCOUNTS.map((account) => [account.id, account.name]));
 
@@ -222,6 +222,12 @@ check("every persona in an account derives the same workspace id, name, currency
     assert.strictEqual(workspace.id, first.id, `${persona.username} is in ${persona.accountId} but derives workspace ${workspace.id}, not ${first.id}`);
     assert.strictEqual(workspace.currency, first.currency, `${persona.username} disagrees with its account on currency`);
     assert.strictEqual(workspace.locale, first.locale, `${persona.username} disagrees with its account on locale`);
+    // `createdAt` is checked for the same reason as the other three, and it is
+    // the easiest one to get wrong: it is the only account field derived from a
+    // date rather than copied off the ACCOUNTS row. Pendo keeps the last write
+    // for account metadata, so members disagreeing here makes the account's age
+    // flip between runs depending only on who identified most recently.
+    assert.strictEqual(workspace.createdAt, first.createdAt, `${persona.username} disagrees with its account on createdAt (${workspace.createdAt} vs ${first.createdAt})`);
   }
 
   assert.strictEqual(

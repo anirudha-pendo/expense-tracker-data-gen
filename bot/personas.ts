@@ -790,9 +790,37 @@ function buildGoals(
 }
 
 /**
+ * The first day of the earliest month ANY member of this persona's account
+ * carries history in, at midnight UTC.
+ *
+ * A member's own earliest month is `now - (historyMonths - 1)` — the archetype
+ * table and `now`, nothing else. No PRNG is read here, which is the whole point:
+ * one member can compute every other member's earliest month, and the minimum
+ * across them, without drawing from anybody's random stream and so without
+ * shifting anybody's seeded history.
+ *
+ * `persona` is folded into the minimum as well as looked up in PERSONAS, so a
+ * persona built outside that table (there are none today) still gets an account
+ * creation date that predates its own transactions.
+ */
+function accountEarliestDate(persona: Persona, now: Date): Date {
+  const nowYm = ymFromDate(now);
+  const earliestYmOf = (archetype: Archetype): number => nowYm - (ARCHETYPES[archetype].historyMonths - 1);
+
+  let earliestYm = earliestYmOf(persona.archetype);
+  for (const member of PERSONAS) {
+    if (member.accountId !== persona.accountId) continue;
+    earliestYm = Math.min(earliestYm, earliestYmOf(member.archetype));
+  }
+  return dateFromYm(earliestYm, 1, 0, 0);
+}
+
+/**
  * Builds a persona's full workspace backstory: user, workspace, categories,
  * historical transactions, budgets and goals. Every id and random choice is
- * derived from `makeRng(persona.id)`, and every date is computed as an
+ * derived from `makeRng(persona.id)` — except the workspace's account-wide
+ * fields, which come off `makeRng(persona.accountId)` so that every member of
+ * an account agrees on them — and every date is computed as an
  * offset backwards from the `now` argument rather than the wall clock — so
  * this is a pure function of `(persona, now)` and returns byte-identical
  * output every time it's called with the same two arguments.
@@ -810,7 +838,6 @@ function buildGoals(
 export function buildSeedData(persona: Persona, now: Date): SeedData {
   const rng = makeRng(persona.id);
   const archetypeDef = ARCHETYPES[persona.archetype];
-  const nowYm = ymFromDate(now);
 
   // The workspace IS the account (see the spec's Accounts section), so its
   // identity comes from the ACCOUNT, never the persona: a second, separate
@@ -828,17 +855,29 @@ export function buildSeedData(persona: Persona, now: Date): SeedData {
   const workspaceOption = accountRng.pick(REGION_WORKSPACE_OPTIONS[account.region]);
   const workspaceName = account.name;
 
-  // Deliberately still persona-derived, unlike the three fields above:
-  // `workspaceCreatedAt` is the floor every transaction, budget and goal
-  // timestamp is measured back from, and archetypes carry different history
-  // lengths (4 to 12 months). An account-wide creation date would leave a
-  // 12-month `power` member holding transactions that predate their own
-  // workspace. Nothing cross-checks it — each member sees only their own
-  // isolated IndexedDB — so the internally consistent choice wins.
-  const earliestYm = nowYm - (archetypeDef.historyMonths - 1);
-  const earliestDate = dateFromYm(earliestYm, 1, 0, 0);
-  const bufferDays = rng.int(WORKSPACE_CREATED_BUFFER_DAYS_MIN, WORKSPACE_CREATED_BUFFER_DAYS_MAX);
-  const workspaceCreatedAt = new Date(earliestDate.getTime() - bufferDays * MS_PER_DAY).toISOString();
+  // Account-derived too, and for the same reason as the three fields above:
+  // this value is `account.createdAt` in the Pendo payload, and Pendo keeps the
+  // last write for account metadata. Derived from the persona — as this did
+  // originally — the seven members of one account each sent a different
+  // creation date for the same account id, so the account's age flipped
+  // between runs depending only on who identified most recently, and any
+  // "accounts created in the last N days" segment gained and lost it at random.
+  //
+  // The floor is the OLDEST member's history, not this member's: each member's
+  // earliest month is `now - (historyMonths - 1)`, a pure function of the
+  // archetype table and `now` with no PRNG in it, so every member can compute
+  // the account-wide minimum and land on the same instant without disturbing
+  // anyone's random stream. The buffer that pushes the date a little further
+  // back comes off `accountRng` for the same reason.
+  //
+  // The invariant the persona-derived version defended — a workspace older than
+  // every transaction, budget and goal inside it — still holds, and holds more
+  // strongly: this member's own history starts at their own earliest month,
+  // which is at or after the account-wide minimum, which is after
+  // `workspaceCreatedAt`.
+  const accountEarliest = accountEarliestDate(persona, now);
+  const bufferDays = accountRng.int(WORKSPACE_CREATED_BUFFER_DAYS_MIN, WORKSPACE_CREATED_BUFFER_DAYS_MAX);
+  const workspaceCreatedAt = new Date(accountEarliest.getTime() - bufferDays * MS_PER_DAY).toISOString();
 
   const workspace: Workspace = {
     id: workspaceId,
