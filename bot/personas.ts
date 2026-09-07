@@ -407,7 +407,7 @@ function accountById(accountId: string, who: string): Account {
 }
 
 /** The ACCOUNTS row a persona belongs to. */
-function accountFor(persona: Persona): Account {
+export function accountFor(persona: Persona): Account {
   return accountById(persona.accountId, persona.username);
 }
 

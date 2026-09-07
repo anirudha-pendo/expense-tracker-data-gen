@@ -65,9 +65,10 @@ import {
   INSIGHTS_SCROLL_PX_MAX,
   UI_RESET_MAX_ESCAPES,
   UI_RESET_SETTLE_MS,
+  makeRng,
   type Rng,
 } from "./config";
-import { ARCHETYPES, type ActionName, type Persona } from "./personas";
+import { ARCHETYPES, accountFor, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
   CUSTOM_CATEGORY_SEEDS,
@@ -416,6 +417,8 @@ async function selectRandomOption(
   ctx: SessionCtx,
   trigger: Locator,
   exclude: string[] = [],
+  /** Defaults to the session PRNG. Overridden only where the choice has to be the same for every member of an account (the workspace form). */
+  rng: Rng = ctx.rng,
 ): Promise<string> {
   const listbox = await openSelect(page, trigger);
   const labels = (await listbox.getByRole("option").allInnerTexts())
@@ -424,7 +427,7 @@ async function selectRandomOption(
   if (labels.length === 0) {
     throw new Error("a select opened with no selectable options");
   }
-  const choice = ctx.rng.pick(labels);
+  const choice = rng.pick(labels);
   await listbox.getByRole("option", { name: choice, exact: true }).first().click();
   await listbox.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });
   return choice;
@@ -548,9 +551,43 @@ function pickDistinct<T>(ctx: SessionCtx, items: T[], count: number): T[] {
   return picked;
 }
 
-/** The persona's first name, for the workspace-name templates. */
-function firstName(persona: Persona): string {
-  return persona.displayName.split(" ")[0];
+/**
+ * The rename `updateWorkspace` is about to perform, derived from the ACCOUNT
+ * and never from the persona.
+ *
+ * The workspace IS the Pendo account, so a rename does not stay local: it
+ * rewrites the shared account's `name`, and the rolls below it rewrite
+ * `currency` and `locale`, for all of the account's members at once. Filled
+ * with the persona's own first name off the session PRNG — as this did
+ * originally — one explorer session renamed a seven-member account after
+ * itself and rolled a random currency, and the next member's identify flipped
+ * it straight back: across a day's runs those fields never settle, and
+ * segmenting accounts by currency or locale stops being reliable. Off the
+ * account, whichever member performs the rename writes identical values.
+ *
+ * `existingName` is what is currently in the input. react-hook-form keeps
+ * "Save changes" disabled until the field is dirty, so the new name has to
+ * differ from it: the candidates are walked in one account-derived rotation
+ * and the first one that differs wins. Members therefore agree even when they
+ * are at different points in that rotation, and the returned PRNG — the
+ * account's, freshly seeded, so the draw order is the same for every member —
+ * is what the currency and locale choices come off.
+ *
+ * Pure and exported so `bot/selftest.ts` can prove two members of one account
+ * agree without opening a browser.
+ */
+export function planWorkspaceRename(persona: Persona, existingName: string): { name: string; rng: Rng } {
+  const account = accountFor(persona);
+  const rng = makeRng(`${account.id}:updateWorkspace`);
+  const candidates = WORKSPACE_NAME_TEMPLATES.map((template) => template.replace("{name}", account.name));
+  const offset = rng.int(0, candidates.length - 1);
+  const name = candidates
+    .map((_, index) => candidates[(offset + index) % candidates.length])
+    .find((candidate) => candidate !== existingName);
+  if (name === undefined) {
+    throw new Error(`no workspace-name template differs from the current "${existingName}"`);
+  }
+  return { name, rng };
 }
 
 // =============================================================================
@@ -965,13 +1002,11 @@ async function runUpdateWorkspace(page: Page, ctx: SessionCtx): Promise<void> {
   await input.waitFor({ state: "visible", timeout: NAV_LANDMARK_TIMEOUT_MS });
 
   const existing = await input.inputValue();
-  const candidates = WORKSPACE_NAME_TEMPLATES.map((template) =>
-    template.replace("{name}", firstName(ctx.persona)),
-  ).filter((name) => name !== existing);
-  if (candidates.length === 0) {
-    throw new Error(`no workspace-name template differs from the current "${existing}"`);
-  }
-  const next = ctx.rng.pick(candidates);
+  // Account-derived, not session-derived — see `planWorkspaceRename`. The
+  // abandon roll below stays on the session PRNG (whether this persona
+  // finishes the form is their own business); everything that lands on the
+  // shared account comes off `accountRng`.
+  const { name: next, rng: accountRng } = planWorkspaceRename(ctx.persona, existing);
 
   await input.fill(next);
 
@@ -982,12 +1017,14 @@ async function runUpdateWorkspace(page: Page, ctx: SessionCtx): Promise<void> {
   }
 
   // The name change alone already makes the form dirty; these are extra
-  // realism, not a requirement for the Save button to enable.
-  if (ctx.rng.chance(WORKSPACE_CURRENCY_CHANGE_RATE)) {
-    await selectRandomOption(page, ctx, form.locator("#currency-setting"));
+  // realism, not a requirement for the Save button to enable. Both the roll
+  // and the option pick draw from `accountRng`: currency and locale go onto
+  // the shared account too, so every member has to choose the same ones.
+  if (accountRng.chance(WORKSPACE_CURRENCY_CHANGE_RATE)) {
+    await selectRandomOption(page, ctx, form.locator("#currency-setting"), [], accountRng);
   }
-  if (ctx.rng.chance(WORKSPACE_LOCALE_CHANGE_RATE)) {
-    await selectRandomOption(page, ctx, form.locator("#locale-setting"));
+  if (accountRng.chance(WORKSPACE_LOCALE_CHANGE_RATE)) {
+    await selectRandomOption(page, ctx, form.locator("#locale-setting"), [], accountRng);
   }
 
   await form.getByRole("button", { name: "Save changes", exact: true }).click();

@@ -20,8 +20,10 @@ import {
   PERSONAS,
   buildSeedData,
   type Archetype,
+  type Persona,
   type SeedData,
 } from "./personas";
+import { planWorkspaceRename } from "./actions";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 
 let checksPassed = 0;
@@ -235,6 +237,54 @@ check("every persona in an account derives the same workspace id, name, currency
     ACCOUNTS.length,
     `expected ${ACCOUNTS.length} distinct workspaces, one per account, got ${firstByAccount.size}`,
   );
+});
+
+check("two members of one account plan the same workspace rename", () => {
+  const membersByAccount = new Map<string, Persona[]>();
+  for (const persona of PERSONAS) {
+    const members = membersByAccount.get(persona.accountId) ?? [];
+    members.push(persona);
+    membersByAccount.set(persona.accountId, members);
+  }
+
+  let pairsChecked = 0;
+  for (const [accountId, members] of membersByAccount) {
+    if (members.length < 2) continue;
+    pairsChecked++;
+
+    // Both start from the seeded workspace name, which is the account's name.
+    const seeded = buildSeedData(members[0], TEST_NOW).workspace.name;
+    const first = planWorkspaceRename(members[0], seeded);
+    const second = planWorkspaceRename(members[members.length - 1], seeded);
+
+    // The workspace IS the shared Pendo account, so a rename by one member
+    // rewrites `account.name`, `account.currency` and `account.locale` for
+    // every other member. Two members disagreeing here is the account's
+    // descriptive fields thrashing on every run — nothing throws.
+    assert.strictEqual(
+      first.name,
+      second.name,
+      `${accountId}: ${members[0].username} renames to "${first.name}" but ${members[members.length - 1].username} renames to "${second.name}"`,
+    );
+    assert.notStrictEqual(first.name, seeded, `${accountId}: the rename must change the name, or "Save changes" stays disabled`);
+
+    // The currency and locale rolls draw from the returned PRNG, so those have
+    // to agree draw-for-draw as well, not just the name.
+    const draws = (rng: { next: () => number }) => Array.from({ length: 6 }, () => rng.next());
+    assert.deepStrictEqual(draws(first.rng), draws(second.rng), `${accountId}: members disagree on the currency/locale draws`);
+
+    // And once one member has renamed, the next member to rename lands on the
+    // same follow-up name rather than reverting to their own persona's.
+    const afterFirst = planWorkspaceRename(members[0], first.name);
+    const afterSecond = planWorkspaceRename(members[members.length - 1], first.name);
+    assert.strictEqual(
+      afterFirst.name,
+      afterSecond.name,
+      `${accountId}: members disagree on the rename that follows "${first.name}"`,
+    );
+  }
+
+  assert.ok(pairsChecked >= 9, `expected at least 9 multi-member accounts to check, got ${pairsChecked}`);
 });
 
 check(
