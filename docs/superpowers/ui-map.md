@@ -356,6 +356,43 @@ Deterministic token parser: strips an explicit `income`/`expense` keyword, then 
 
 ---
 
+## 11. Analytics — what the page sends to Pendo
+
+Built in one place, `src/lib/analytics.ts`. Nothing else constructs this payload.
+
+```
+visitor: { id, full_name, username, email, avatarInitials, createdAt }
+account: { id, name, currency, locale, createdAt }
+```
+
+**The account is the workspace.** There is no separate account entity in the app
+and no `accounts` object store. `account.id` is `workspace.id`, which is why
+`bot/personas.ts` derives one shared workspace row per `accountId` — that
+sharing is the only thing that makes 40 seeded visitors group into 12 Pendo
+accounts. Break it and the accounts silently become 40 singletons.
+
+Two fields are conditional:
+
+- `visitor.email` — the key is **absent** for users created before email
+  existed. Never `undefined`, never `""`.
+- `account` — the whole block is **absent** when the user has no workspace,
+  which is every moment between sign-up and workspace setup.
+
+| Moment | Call | Account included? |
+|---|---|---|
+| Session bootstrap for a returning user (`useAuth.loadSession`) | `identify` | Yes, when the session names a workspace. Fires after the workspace read, not before |
+| Sign-up (`useAuth.signUp`) | `identify` | No — none exists yet |
+| Sign-in (`useAuth.signIn`) | `identify` | Yes |
+| Workspace created (`WorkspaceSetupPage`) | `identify` | Yes — this is where a fresh sign-up gains one |
+| Workspace renamed or money settings changed (Settings → Workspace) | `updateOptions` | Yes. `updateOptions`, not `identify`, so a rename does not start a new session |
+| Sign-out (`useAuth.signOut`) | `pendo?.clearSession()` | — |
+
+The bot needs no code of its own for any of this: it seeds workspaces that
+already agree per account, and `updateProfile` / `updateWorkspace` are already
+in the action mix, so the identify paths get exercised by the ordinary walk.
+
+---
+
 ## Navigation — `src/shared/components/app-nav.tsx`
 
 ### `AppNav` — actually rendered (inside `AppLayout`, every protected page)
