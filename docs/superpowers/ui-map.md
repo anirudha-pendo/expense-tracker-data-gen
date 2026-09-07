@@ -388,9 +388,34 @@ Two fields are conditional:
 | Display name changed (Settings → Profile) | `updateOptions` | Yes, when the user has a workspace. The visitor's `full_name` moved; the account block is unchanged and re-sent as-is |
 | Sign-out (`useAuth.signOut`) | `clearSession()`, guarded with `typeof` | — |
 
-The bot needs no code of its own for any of this: it seeds workspaces that
-already agree per account, and `updateProfile` / `updateWorkspace` are already
-in the action mix, so the identify paths get exercised by the ordinary walk.
+### Which of those the bot's walk actually reaches
+
+Four of the seven, on an ordinary run:
+
+- **Session bootstrap** — every returning session starts here, and it is the
+  only moment that carries the account on a returning visitor's first call.
+- **Display name changed** — `updateProfile` is in the action mix of every
+  archetype except `churning`, which weights it 0.
+- **Workspace renamed** — `updateWorkspace`, same weights. The name, currency
+  and locale it writes are derived from the account, not the persona
+  (`planWorkspaceRename` in `bot/actions.ts`), because this call rewrites the
+  shared account for every member of it.
+- **Sign-out** — `signOut` carries a non-zero weight in every archetype, and
+  `bot/selftest.ts` enforces that.
+
+Three are **not** reached by an ordinary run, and saying otherwise is how a
+broken selector on them survives a green run:
+
+- **Sign-in.** Returning personas resume from a seeded `localStorage` session,
+  so `useAuth.signIn` never runs and the email sign-in path stays unexercised.
+- **Sign-up** and **workspace created.** Both are on the new-visitor walk, which
+  is reached only on a `NEW_VISITOR_RATE` share of a run's slots — 0.15. To
+  exercise them on purpose, raise that constant in `bot/config.ts` for one run
+  and revert it afterwards; the `bot-sync` skill's Step 6 spells this out.
+
+The account grouping itself needs no bot code at run time: the seeded workspaces
+already agree per account, and `bot/selftest.ts` enforces that agreement on
+`id`, `name`, `currency`, `locale` and `createdAt`.
 
 ---
 
