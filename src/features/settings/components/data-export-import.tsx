@@ -165,7 +165,7 @@ export function DataExportImport() {
     <div className="flex flex-col gap-4">
       <Alert>
         <AlertDescription>
-          Your data is stored locally in your browser. Export regularly to keep a backup.
+          Your data lives only in this browser. Export a backup regularly so you never lose it.
         </AlertDescription>
       </Alert>
 
