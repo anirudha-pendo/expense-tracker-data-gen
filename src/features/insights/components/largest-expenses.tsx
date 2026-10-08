@@ -25,11 +25,14 @@ export function LargestExpenses({ transactions, categories, currency, locale }: 
             No expenses recorded this month.
           </p>
         ) : (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-1">
             {transactions.map((t, idx) => {
               const cat = catMap.get(t.categoryId);
               return (
-                <div key={t.id} className="flex items-center justify-between gap-3">
+                <div
+                  key={t.id}
+                  className="-mx-2 flex items-center justify-between gap-3 rounded-md px-2 py-1.5 transition-colors duration-150 ease-out hover:bg-muted/40"
+                >
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="font-mono text-[10px] text-muted-foreground/40 tabular-nums">
                       {String(idx + 1).padStart(2, "0")}
