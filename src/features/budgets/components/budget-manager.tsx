@@ -129,7 +129,7 @@ export function BudgetManager() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm font-bold text-muted-foreground">
         Set monthly spending limits per category. You&apos;ll be alerted at 80% and when a budget is exceeded.
       </p>
       <div className="rounded-lg border px-4">
