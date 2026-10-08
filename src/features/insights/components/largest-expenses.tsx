@@ -29,7 +29,7 @@ export function LargestExpenses({ transactions, categories, currency, locale }: 
             {transactions.map((t, idx) => {
               const cat = catMap.get(t.categoryId);
               return (
-                <div key={t.id} className="flex items-center justify-between gap-3">
+                <div key={t.id} className="flex items-center justify-between gap-3 rounded-md -mx-2 px-2 py-1 transition-colors hover:bg-primary/10">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="font-mono text-[10px] text-muted-foreground/40 tabular-nums">
                       {String(idx + 1).padStart(2, "0")}
