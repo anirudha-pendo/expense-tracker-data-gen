@@ -1,0 +1,38 @@
+import { isTextUIPart } from "ai";
+import type { AssistantUIMessage } from "../types";
+
+type AssistantPart = AssistantUIMessage["parts"][number];
+
+function AssistantPartView({ part }: { part: AssistantPart }) {
+  if (part.type === "text") {
+    return part.text.length > 0 ? <p className="whitespace-pre-wrap text-sm text-foreground">{part.text}</p> : null;
+  }
+  return null;
+}
+
+export function MessageItem({ message }: { message: AssistantUIMessage }) {
+  if (message.role === "user") {
+    const text = message.parts
+      .filter(isTextUIPart)
+      .map((p) => p.text)
+      .join("\n");
+    return (
+      <div
+        data-message-role="user"
+        className="stagger-item ml-auto max-w-[85%] whitespace-pre-wrap border border-border/60 bg-muted/40 px-3 py-2 text-sm"
+      >
+        {text}
+      </div>
+    );
+  }
+  return (
+    <div data-message-role="assistant" className="stagger-item flex flex-col gap-2">
+      {message.parts.map((part, index) => (
+        <AssistantPartView key={`${message.id}-${index}`} part={part} />
+      ))}
+      {message.metadata?.stopped === true && (
+        <span className="font-mono text-[10px] tracking-wider text-muted-foreground/60">stopped</span>
+      )}
+    </div>
+  );
+}
