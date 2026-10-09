@@ -146,9 +146,15 @@ export function findTransactionsIn(args: ComputeArgs<FindTransactionsInput>): Va
       amountFormatted: formatMoney(amount, money),
     };
   });
-  const output: FindTransactionsOutput = { totalMatches: matched.length, transactions: rows };
+  const describe = (shown: FoundTransaction[]): FindTransactionsOutput => ({
+    totalMatches: matched.length,
+    returned: shown.length,
+    truncated: shown.length < matched.length,
+    transactions: shown,
+  });
+  let output = describe(rows);
   while (output.transactions.length > 0 && byteSize(output) > ASSISTANT_LIMITS.maxToolOutputBytes) {
-    output.transactions = output.transactions.slice(0, -1);
+    output = describe(output.transactions.slice(0, -1));
   }
   return { ok: true, value: output };
 }

@@ -61,6 +61,9 @@ export interface FoundTransaction {
 
 export interface FindTransactionsOutput {
   totalMatches: number;
+  returned: number;
+  // True when more transactions matched than are listed (row limit or the 4 KB output cap).
+  truncated: boolean;
   transactions: FoundTransaction[];
 }
 

@@ -2,7 +2,7 @@ import { TOOL_NAMES } from "./tool-names.js";
 import type { AssistantContext } from "./types.js";
 
 // Bump on any change to this text or to TOOL_DESCRIPTIONS.
-export const ASSISTANT_PROMPT_VERSION = "2026-10-09.3";
+export const ASSISTANT_PROMPT_VERSION = "2026-10-09.4";
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();

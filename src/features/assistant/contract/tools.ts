@@ -76,7 +76,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   [TOOL_NAMES.getSpendingSummary]:
     "Totals of the user's expenses (default) or income between two dates, overall and per category, with pre-formatted amounts. Use for any how-much or where-did-my-money-go question.",
   [TOOL_NAMES.findTransactions]:
-    "Search the user's transactions by text, category, type, date range or amount. Newest first. Use it to show transactions and always before editing or deleting one.",
+    "Search the user's transactions by text, category, type, date range or amount. Newest first. Use it to show transactions and always before editing or deleting one. totalMatches counts every match, returned counts the rows listed; when truncated is true, more matched than are listed, so narrow the search instead of guessing about unlisted rows.",
   [TOOL_NAMES.addTransaction]:
     "Propose a new transaction. The app shows a confirm card; nothing is saved unless the user confirms. Omit type to infer it from the category.",
   [TOOL_NAMES.updateTransaction]:
