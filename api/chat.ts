@@ -29,7 +29,7 @@ import { chatRequestSchema } from "../src/features/assistant/contract/request.js
 import { TOOL_DESCRIPTIONS, TOOL_INPUT_SCHEMAS } from "../src/features/assistant/contract/tools.js";
 import type { ToolName } from "../src/features/assistant/contract/tool-names.js";
 import type { AssistantMessageMetadata } from "../src/features/assistant/contract/types.js";
-import { hasUnknownToolPart, resolveApiKey, userTextTooLong, utf8ByteLength } from "./_lib/guards.js";
+import { dropUnfinishedUnknownToolParts, resolveApiKey, userTextTooLong, utf8ByteLength } from "./_lib/guards.js";
 
 // No execute: every tool runs in the browser against IndexedDB.
 const tools = {
@@ -131,10 +131,11 @@ export async function POST(request: Request): Promise<Response> {
   const json = parseJson(raw);
   if (!json.ok) return errorResponse("bad_request", requestId);
   const parsed = chatRequestSchema.safeParse(json.value);
-  if (!parsed.success || userTextTooLong(parsed.data.messages) || hasUnknownToolPart(parsed.data.messages)) {
-    return errorResponse("bad_request", requestId);
-  }
-  const validated = await safeValidateUIMessages<ServerMessage>({ messages: parsed.data.messages, tools });
+  if (!parsed.success || userTextTooLong(parsed.data.messages)) return errorResponse("bad_request", requestId);
+  const validated = await safeValidateUIMessages<ServerMessage>({
+    messages: dropUnfinishedUnknownToolParts(parsed.data.messages),
+    tools,
+  });
   if (!validated.success || validated.data[0]?.role !== "user") return errorResponse("bad_request", requestId);
 
   let modelMessages: ModelMessage[];

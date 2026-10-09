@@ -26,13 +26,15 @@ export function userTextTooLong(messages: ReadonlyArray<{ role: string; parts: r
   );
 }
 
-// UI message validation checks known tools' inputs but lets unknown tool parts through.
-export function hasUnknownToolPart(messages: ReadonlyArray<{ parts: readonly unknown[] }>): boolean {
-  return messages.some((m) =>
-    m.parts.some((p) => {
-      if (typeof p !== "object" || p === null || !("type" in p) || typeof p.type !== "string") return false;
-      if (p.type === "dynamic-tool") return true;
-      return p.type.startsWith("tool-") && !isToolName(p.type.slice("tool-".length));
-    }),
-  );
+const FINISHED_TOOL_STATES: readonly unknown[] = ["output-available", "output-error", "output-denied"];
+
+function isUnfinishedUnknownToolPart(part: unknown): boolean {
+  if (typeof part !== "object" || part === null || !("type" in part) || typeof part.type !== "string") return false;
+  if (!part.type.startsWith("tool-") || isToolName(part.type.slice("tool-".length))) return false;
+  return !("state" in part) || !FINISHED_TOOL_STATES.includes(part.state);
+}
+
+// A stopped call to an undeclared tool fails UI validation; drop it as ignoreIncompleteToolCalls would.
+export function dropUnfinishedUnknownToolParts<M extends { parts: unknown[] }>(messages: readonly M[]): M[] {
+  return messages.map((m) => ({ ...m, parts: m.parts.filter((p) => !isUnfinishedUnknownToolPart(p)) }));
 }
