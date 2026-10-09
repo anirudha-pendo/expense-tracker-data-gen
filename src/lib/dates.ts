@@ -15,6 +15,14 @@ export function localIsoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// The calendar month `offset` months from the month of `isoDay` (a valid YYYY-MM-DD), first and last day.
+export function monthRange(isoDay: string, offset: number): { from: string; to: string } {
+  const [year, month] = isoDay.split("-").map(Number);
+  const first = new Date(Date.UTC(year, month - 1 + offset, 1));
+  const last = new Date(Date.UTC(year, month + offset, 0));
+  return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) };
+}
+
 export function isInMonth(dateString: string, monthOf: Date): boolean {
   return localIsoDate(parseCalendarDate(dateString)).slice(0, 7) === localIsoDate(monthOf).slice(0, 7);
 }
