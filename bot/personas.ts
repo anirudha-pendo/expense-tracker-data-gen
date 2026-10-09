@@ -864,6 +864,12 @@ function accountEarliestDate(persona: Persona, now: Date): Date {
  * `user.passwordHash` and `user.salt` are left empty; Task 3 fills them in
  * (hashing needs the browser's SubtleCrypto, which isn't available here).
  */
+/** The category seeds behind a returning persona's workspace, so generated text can name the persona's own categories. */
+export function personaCategorySeeds(persona: Persona): CategorySeed[] {
+  const names = new Set(buildSeedData(persona, new Date()).categories.map((category) => category.name));
+  return [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS].filter((seed) => names.has(seed.name));
+}
+
 export function buildSeedData(persona: Persona, now: Date): SeedData {
   const rng = makeRng(persona.id);
   const archetypeDef = ARCHETYPES[persona.archetype];

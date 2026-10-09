@@ -105,6 +105,8 @@ export interface SessionCtx {
   log: (msg: string) => void;
   /** Set once a panel alert appears; the assistant is not used again this session. */
   assistantOff: boolean;
+  /** The categories this session's workspace was seeded with; prompts name these. */
+  categorySeeds: readonly CategorySeed[];
 }
 
 export interface Action {
@@ -1240,7 +1242,7 @@ async function runAskAssistant(page: Page, ctx: SessionCtx): Promise<void> {
 
   const prompts = ctx.rng.int(ASSISTANT_PROMPTS_MIN, ASSISTANT_PROMPTS_MAX);
   for (let i = 0; i < prompts; i++) {
-    const { intent, text } = buildAssistantPrompt(ctx.rng, DEFAULT_CATEGORY_SEEDS);
+    const { intent, text } = buildAssistantPrompt(ctx.rng, ctx.categorySeeds);
     const users = log.locator('[data-message-role="user"]');
     const sentBefore = await users.count();
     const repliesBefore = await log.locator('[data-message-role="assistant"]').count();

@@ -83,11 +83,12 @@ import {
   type Action,
   type SessionCtx,
 } from "./actions";
-import { ARCHETYPES, PERSONAS, type ActionName, type Persona } from "./personas";
+import { ARCHETYPES, PERSONAS, personaCategorySeeds, type ActionName, type Persona } from "./personas";
 import { clearBrowserState, seedPersona } from "./seed";
 import {
   buildNewVisitorIdentity,
   CURRENCY_OPTION_LABELS,
+  DEFAULT_CATEGORY_SEEDS,
   LOCALE_OPTION_LABELS,
   PERSONA_PASSWORD,
   REGION_WORKSPACE_OPTIONS,
@@ -659,6 +660,9 @@ async function runOneSession(
         : ARCHETYPES[planned.persona.archetype].abandonRate,
     log,
     assistantOff: false,
+    // A new visitor's fresh workspace holds only the app's default categories.
+    categorySeeds:
+      planned.kind === "returning" ? personaCategorySeeds(planned.persona) : DEFAULT_CATEGORY_SEEDS,
   };
 
   let context: BrowserContext | null = null;
