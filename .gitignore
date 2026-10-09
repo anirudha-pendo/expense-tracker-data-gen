@@ -30,4 +30,5 @@ dist-ssr
 bot/node_modules
 bot/failures
 .vercel
-.env*
+.env
+.env*.local
