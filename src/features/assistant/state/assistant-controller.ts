@@ -3,10 +3,12 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } fro
 import type { Category } from "@/types";
 import { parseAssistantError } from "../contract/errors";
 import { ASSISTANT_LIMITS } from "../contract/limits";
+import { localIsoDate } from "@/lib/dates";
 import { buildRequestContext, canAutoSendAgain, retryStrategy, takeRecentMessages } from "../lib/conversation";
 import { currentTimeZone } from "../lib/intl";
 import type { MoneyFormat } from "../lib/money";
 import type { AssistantUIMessage } from "../types";
+import { handleAssistantToolCall, type ToolRunnerDeps } from "./tool-runner";
 
 export type SessionLock = "not_configured" | "provider_quota_exhausted";
 
@@ -96,13 +98,29 @@ export class AssistantController {
     return true;
   }
 
+  // Bound to one chat so a tool finishing after a workspace switch cannot touch the new chat's count.
+  private toolDepsFor(chat: Chat<AssistantUIMessage>): ToolRunnerDeps {
+    const adjust = (delta: number) => {
+      if (this.snapshot.chat !== chat) return;
+      this.update({ pendingCalls: Math.max(0, this.snapshot.pendingCalls + delta) });
+    };
+    return {
+      session: () =>
+        this.session.workspaceId === null
+          ? null
+          : { workspaceId: this.session.workspaceId, money: this.session.money, today: localIsoDate(new Date()) },
+      beginCall: () => adjust(1),
+      endCall: () => adjust(-1),
+    };
+  }
+
   private reportError(error: Error): void {
     const code = parseAssistantError(error);
     if (code === "not_configured" || code === "provider_quota_exhausted") this.update({ lock: code });
   }
 
   private createChat(): Chat<AssistantUIMessage> {
-    return new Chat<AssistantUIMessage>({
+    const chat: Chat<AssistantUIMessage> = new Chat<AssistantUIMessage>({
       transport: new DefaultChatTransport<AssistantUIMessage>({
         api: "/api/chat",
         prepareSendMessagesRequest: ({ id, messages }) => ({
@@ -118,8 +136,10 @@ export class AssistantController {
         }),
       }),
       onError: (error) => this.reportError(error),
+      onToolCall: ({ toolCall }) => handleAssistantToolCall(chat, toolCall, this.toolDepsFor(chat)),
       sendAutomaticallyWhen: ({ messages }) => this.shouldAutoSend(messages),
     });
+    return chat;
   }
 
   private startTurn(): void {

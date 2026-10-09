@@ -1,5 +1,6 @@
 import { isTextUIPart } from "ai";
 import type { AssistantUIMessage } from "../types";
+import { ToolRow } from "./tool-row";
 
 type AssistantPart = AssistantUIMessage["parts"][number];
 
@@ -7,6 +8,7 @@ function AssistantPartView({ part }: { part: AssistantPart }) {
   if (part.type === "text") {
     return part.text.length > 0 ? <p className="whitespace-pre-wrap text-sm text-foreground">{part.text}</p> : null;
   }
+  if (part.type.startsWith("tool-")) return <ToolRow part={part} />;
   return null;
 }
 
