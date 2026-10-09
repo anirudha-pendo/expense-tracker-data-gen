@@ -25,6 +25,8 @@ Stack facts that affect selector strategy:
 | `/settings` | `ProtectedRoute` | `SettingsPage` | `<h1>` "Settings"; 5 section header labels: "Profile", "Workspace", "Categories", "Budgets", "Data" |
 | `*` | — | redirects to `/` | — |
 
+`vercel.json` rewrites every path **except `/api/*`** to `index.html` (`"/((?!api/).*)"`). `POST /api/chat` is the assistant's Vercel Function; Vite (`npm run dev`) does not serve it — use `vercel dev` (port 3000) to exercise the assistant locally.
+
 `ProtectedRoute` / `GuestGuard` / `WorkspaceGuard` render `null` while `isLoading` (session bootstrap from IndexedDB) — the bot should wait for either a redirect or a landmark, not assume instant render.
 
 `AppLayout`'s `<h1>` title text is **exactly** one of: `Dashboard`, `Transactions`, `Insights`, `Goals`, `Settings` (rendered uppercase via CSS only — actual DOM text is the mixed-case string above). Auth/workspace-setup pages do **not** use `AppLayout` and have no such `<h1>`.
@@ -122,7 +124,7 @@ On success: creates workspace + seeds default categories, then `navigate("/", { 
 
 ## 4. `src/features/dashboard/` — Dashboard page (read-mostly; ~4 interactive elements of its own)
 
-Composed of `InsightsStrip`, `SummaryCards`, `SpendingByCategoryChart`, `MonthlyTrendChart`, `BudgetOverview`, `RecentTransactions` — plus whatever `AppLayout` contributes (nav + Quick Add trigger).
+Composed of `InsightsStrip`, `SummaryCards`, `SpendingByCategoryChart`, `MonthlyTrendChart`, `BudgetOverview`, `RecentTransactions` — plus whatever `AppLayout` contributes (nav + Assistant and Quick Add triggers).
 
 | Element | Type | Handle | Conditions |
 |---|---|---|---|
@@ -338,7 +340,7 @@ Toasts: `"Exported successfully"` / `"Export failed"` · `"CSV exported successf
 ## 10. `src/features/quick-add/` — Quick Add command palette
 
 ### How it's opened
-1. **Keyboard shortcut**: `Cmd+K` / `Ctrl+K` — global `keydown` listener in `AppLayout`, so it only works on pages rendering `AppLayout` (Dashboard, Transactions, Insights, Goals, Settings — **not** sign-in/sign-up/workspace-setup). Pressing it while **another** dialog is open (`[data-slot="dialog-content"]` or `[data-slot="alert-dialog-content"]` present) is **ignored**. **Close any other open dialog first.**
+1. **Keyboard shortcut**: `Cmd+K` / `Ctrl+K` — global `keydown` listener in `AppLayout`, so it only works on pages rendering `AppLayout` (Dashboard, Transactions, Insights, Goals, Settings — **not** sign-in/sign-up/workspace-setup). Pressing it while **another** dialog is open (`[data-slot="dialog-content"]` or `[data-slot="alert-dialog-content"]` present) or while the assistant panel is open (`[data-slot="sheet-content"]`) is **ignored**. **Close any other open dialog or panel first.**
 2. **Button click**: every page header renders `<button aria-label="Open quick add">`. **Use this `aria-label` — the visible text varies by OS and viewport.**
 
 ### Dialog behaviour (`components/quick-add-palette.tsx`)
@@ -416,6 +418,39 @@ broken selector on them survives a green run:
 The account grouping itself needs no bot code at run time: the seeded workspaces
 already agree per account, and `bot/selftest.ts` enforces that agreement on
 `id`, `name`, `currency`, `locale` and `createdAt`.
+
+---
+
+## 12. `src/features/assistant/` — Assistant panel
+
+### How it's opened
+1. Header button `aria-label="Open assistant"` (left of Quick Add, every `AppLayout` page). Visible text `Assistant` + `⌘J`/`Ctrl J`; below `sm` only the icon and the key hint. It is the Radix `SheetTrigger`, so closing the panel returns focus to it.
+2. **Cmd/Ctrl+J** toggles. Ignored while a `dialog-content`/`alert-dialog-content` is open. Cmd/Ctrl+K (Quick Add) is ignored while the panel (`[data-slot="sheet-content"]`) is open.
+
+### Structure (Radix `Sheet`, `role="dialog"` named `Assistant`)
+| Element | Selector |
+|---|---|
+| Panel | `getByRole("dialog", { name: "Assistant" })` (`data-slot="sheet-content"`) |
+| Message list | `getByRole("log", { name: "Conversation" })`, `aria-busy="true"` while a request, a browser tool call or an automatic follow-up is in flight |
+| Messages | `[data-message-role="user"]`, `[data-message-role="assistant"]` |
+| Tool status rows | `[data-tool="<toolName>"][data-state="running|done|cancelled|error"]` |
+| Confirm card | `getByRole("group", { name: "Add transaction" | "Edit transaction" | "Delete transaction" })`, buttons `Confirm` / `Cancel` (scope inside the log); a resolved card has no buttons |
+| Composer | `getByLabel("Message")` textarea (Enter sends, Shift+Enter new line); buttons `Send` / `Stop` |
+| Alert | `getByRole("alert")` inside the panel, at most one; `Retry` button when retryable |
+| Jump button | `Jump to latest`, only after the user scrolled up |
+| Status region | sr-only `role="status"` (tool states, "Confirmation needed: …") |
+| Close | `Escape` or the `Close` (sr-only) X button |
+
+The conversation lives in memory only: it survives closing the panel and client-side route changes, and is gone after a reload, sign-out or workspace switch.
+
+### Done signal
+After sending, wait for the new `[data-message-role="user"]`, then for a new assistant message **or** an alert, then for `[role="log"][aria-busy="false"]`. A pending confirm card leaves `aria-busy="false"`.
+
+### Soft states (copy is exact, from `src/features/assistant/contract/errors.ts`)
+Any alert means the assistant could not answer. `The assistant isn't set up yet.` and `The assistant has reached its usage limit. Try again later.` disable the composer for the session (the bot turns the assistant off for the whole run on these two). `The assistant is busy right now. Try again in a minute.` (provider rate limit/overload) and `The assistant could not answer. Try again.` are skips that turn the assistant off for that session only. `You're offline. Reconnect to use the assistant.` disables it until back online. Against `npm run dev` every send ends in `The assistant could not answer. Try again.` (no `/api`).
+
+### Writes
+Confirm writes through the same repositories as the forms and emits `app:data-changed`; toasts `Added: {description}`, `Updated: {description}`, `Deleted: {description}`. A confirmed add or edit also runs the budget threshold toast, like the forms.
 
 ---
 
