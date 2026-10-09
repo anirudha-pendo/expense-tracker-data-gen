@@ -1,0 +1,16 @@
+export const ASSISTANT_LIMITS = {
+  maxBodyBytes: 128 * 1024,
+  maxMessages: 12,
+  maxUserChars: 2000,
+  userCharsCounterFrom: 1800,
+  maxAutoRounds: 8,
+  maxListRows: 20,
+  defaultListRows: 10,
+  maxToolOutputBytes: 4096,
+  maxContextCategories: 100,
+  maxAmount: 1_000_000_000,
+  maxSpanDays: 366,
+  descriptionMax: 100,
+  notesMax: 500,
+  searchTextMax: 100,
+} as const;
