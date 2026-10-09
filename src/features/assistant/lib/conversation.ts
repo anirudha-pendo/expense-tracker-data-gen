@@ -22,6 +22,21 @@ export function takeRecentMessages<M extends { role: string }>(messages: readonl
   return firstUser === -1 ? [] : recent.slice(firstUser);
 }
 
+// Drops the oldest whole turns until `fits` holds; a turn's tool calls and results stay together, the latest turn always stays.
+export function trimOldestTurns<M extends { role: string }>(messages: readonly M[], fits: (kept: M[]) => boolean): M[] {
+  let kept = [...messages];
+  while (!fits(kept)) {
+    const nextTurn = kept.findIndex((message, index) => index > 0 && message.role === "user");
+    if (nextTurn === -1) break;
+    kept = kept.slice(nextTurn);
+  }
+  return kept;
+}
+
+export function jsonByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
 export function countStepStarts(parts: readonly PartLike[]): number {
   return parts.filter((part) => part.type === "step-start").length;
 }

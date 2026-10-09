@@ -9,9 +9,11 @@ import { applyTransactionProposal, StaleWriteError } from "../executors/transact
 import {
   buildRequestContext,
   canAutoSendAgain,
+  jsonByteLength,
   retryStrategy,
   seenIdsFromTool,
   takeRecentMessages,
+  trimOldestTurns,
 } from "../lib/conversation";
 import { currentTimeZone } from "../lib/intl";
 import type { MoneyFormat } from "../lib/money";
@@ -146,17 +148,18 @@ export class AssistantController {
     const chat: Chat<AssistantUIMessage> = new Chat<AssistantUIMessage>({
       transport: new DefaultChatTransport<AssistantUIMessage>({
         api: "/api/chat",
-        prepareSendMessagesRequest: ({ id, messages }) => ({
-          body: {
-            id,
-            messages: takeRecentMessages(messages, ASSISTANT_LIMITS.maxMessages),
-            context: buildRequestContext(
-              { categories: this.categories, currency: this.session.money.currency, locale: this.session.money.locale },
-              new Date(),
-              currentTimeZone(),
-            ),
-          },
-        }),
+        prepareSendMessagesRequest: ({ id, messages }) => {
+          const context = buildRequestContext(
+            { categories: this.categories, currency: this.session.money.currency, locale: this.session.money.locale },
+            new Date(),
+            currentTimeZone(),
+          );
+          const recent = trimOldestTurns(
+            takeRecentMessages(messages, ASSISTANT_LIMITS.maxMessages),
+            (kept) => jsonByteLength({ id, messages: kept, context }) <= ASSISTANT_LIMITS.maxBodyBytes,
+          );
+          return { body: { id, messages: recent, context } };
+        },
       }),
       onError: (error) => this.reportError(error),
       onToolCall: ({ toolCall }) => handleAssistantToolCall(chat, toolCall, this.toolDepsFor(chat)),
