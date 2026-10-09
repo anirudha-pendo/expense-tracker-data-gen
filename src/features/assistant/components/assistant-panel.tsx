@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAssistant } from "../state/assistant-context";
 import { AssistantAlertBar } from "./assistant-alert";
@@ -8,21 +7,19 @@ import { MessageList } from "./message-list";
 import { StatusAnnouncer } from "./status-announcer";
 
 export function AssistantPanel() {
-  const { open, setOpen } = useAssistant();
-  const contentRef = useRef<HTMLDivElement>(null);
+  const { open, setOpen, composerRef } = useAssistant();
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <AssistantTrigger />
       </SheetTrigger>
       <SheetContent
-        ref={contentRef}
         side="right"
         className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md motion-reduce:data-open:animate-none motion-reduce:data-closed:animate-none"
         onOpenAutoFocus={(event) => {
           // Start in the composer, not on Retry or Jump to latest.
           event.preventDefault();
-          contentRef.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus();
+          composerRef.current?.focus();
         }}
       >
         <SheetHeader className="flex-row items-baseline justify-between gap-3 border-b border-border/40 px-5 py-3 pr-12">

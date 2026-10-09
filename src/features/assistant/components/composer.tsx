@@ -7,7 +7,7 @@ import { useAssistant } from "../state/assistant-context";
 const IME_PROCESS_KEY = 229;
 
 export function Composer() {
-  const { send, stop, busy, ready, composerDisabled } = useAssistant();
+  const { send, stop, busy, ready, composerDisabled, composerRef } = useAssistant();
   const [text, setText] = useState("");
   const trimmed = text.trim();
   const sendDisabled = composerDisabled || busy || !ready || trimmed.length === 0;
@@ -34,6 +34,7 @@ export function Composer() {
       }}
     >
       <Textarea
+        ref={composerRef}
         aria-label="Message"
         value={text}
         onChange={(event) => setText(event.target.value)}
@@ -55,7 +56,15 @@ export function Composer() {
             </span>
           )}
           {busy ? (
-            <Button type="button" size="sm" variant="outline" onClick={stop}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                stop();
+                composerRef.current?.focus();
+              }}
+            >
               Stop
             </Button>
           ) : (

@@ -8,7 +8,7 @@ import { TransactionCard } from "./transaction-card";
 type AssistantPart = AssistantUIMessage["parts"][number];
 
 function WriteCardSlot({ toolCallId, part }: { toolCallId: string; part: { type: string; state?: string } }) {
-  const { proposals, resolving, confirm, cancel, money } = useAssistant();
+  const { proposals, resolving, confirm, cancel, money, composerRef } = useAssistant();
   const entry = proposals.get(toolCallId);
   if (entry === undefined) return null;
   return (
@@ -17,8 +17,14 @@ function WriteCardSlot({ toolCallId, part }: { toolCallId: string; part: { type:
       state={toolRowState(part)}
       resolving={resolving.has(toolCallId)}
       money={money}
-      onConfirm={() => confirm(toolCallId)}
-      onCancel={() => cancel(toolCallId)}
+      onConfirm={() => {
+        confirm(toolCallId);
+        composerRef.current?.focus();
+      }}
+      onCancel={() => {
+        cancel(toolCallId);
+        composerRef.current?.focus();
+      }}
     />
   );
 }

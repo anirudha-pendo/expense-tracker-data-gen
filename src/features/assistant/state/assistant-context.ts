@@ -1,4 +1,4 @@
-import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
+import { createContext, useContext, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { ChatStatus } from "ai";
 import type { AlertVariant, AssistantErrorCode } from "../contract/errors";
 import type { MoneyFormat } from "../lib/money";
@@ -30,6 +30,7 @@ export interface AssistantContextValue {
   confirm: (toolCallId: string) => void;
   cancel: (toolCallId: string) => void;
   stoppedBeforeReply: ReadonlySet<string>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
 }
 
 export const AssistantContext = createContext<AssistantContextValue | null>(null);

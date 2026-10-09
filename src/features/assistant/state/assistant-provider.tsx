@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import { lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
@@ -36,6 +36,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine);
   const [open, setOpen] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     controller.syncSession({ workspaceId, money });
@@ -98,6 +99,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       confirm: (toolCallId: string) => report(controller.confirm(toolCallId), "confirm"),
       cancel: (toolCallId: string) => report(controller.cancel(toolCallId), "cancel"),
       stoppedBeforeReply: snapshot.stoppedBeforeReply,
+      composerRef,
     };
   }, [controller, error, loadCategories, messages, online, open, snapshot, status]);
 
