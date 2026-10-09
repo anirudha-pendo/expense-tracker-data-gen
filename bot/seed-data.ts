@@ -488,9 +488,7 @@ export const WORKSPACE_CREATED_BUFFER_DAYS_MIN = 1;
 export const WORKSPACE_CREATED_BUFFER_DAYS_MAX = 14;
 
 // --- Assistant prompt bank ---------------------------------------------------
-// Placeholders: {category} (expense category name), {description} (one of its
-// descriptions, lower-cased), {amount} (within its amount range). The bot never
-// asserts on the reply; these only shape realistic agent traffic.
+// {category}, {description} and {amount} are filled from one of the session's expense category seeds.
 
 export type AssistantPromptIntent =
   | "getSpendingSummary"
