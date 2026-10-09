@@ -30,6 +30,7 @@ export interface ControllerSnapshot {
   stoppedTurn: boolean;
   pendingCalls: number;
   categoriesLoaded: boolean;
+  categoriesFailed: boolean;
   proposals: ReadonlyMap<string, ProposalEntry>;
   resolving: ReadonlySet<string>;
 }
@@ -78,6 +79,7 @@ export class AssistantController {
       stoppedTurn: false,
       pendingCalls: 0,
       categoriesLoaded: false,
+      categoriesFailed: false,
       proposals: new Map(),
       resolving: new Set(),
     };
@@ -99,7 +101,14 @@ export class AssistantController {
   setCategories(workspaceId: string, categories: readonly Category[]): void {
     if (workspaceId !== this.session.workspaceId) return;
     this.categories = categories;
-    if (!this.snapshot.categoriesLoaded) this.update({ categoriesLoaded: true });
+    if (!this.snapshot.categoriesLoaded || this.snapshot.categoriesFailed) {
+      this.update({ categoriesLoaded: true, categoriesFailed: false });
+    }
+  }
+
+  markCategoriesFailed(workspaceId: string): void {
+    if (workspaceId !== this.session.workspaceId) return;
+    this.update({ categoriesFailed: true });
   }
 
   get money(): MoneyFormat {

@@ -45,7 +45,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     if (workspaceId === null) return;
     getCategoriesByWorkspaceId(workspaceId).then(
       (categories) => controller.setCategories(workspaceId, categories),
-      (error: unknown) => console.error("assistant: could not load categories", error),
+      (error: unknown) => {
+        console.error("assistant: could not load categories", error);
+        controller.markCategoriesFailed(workspaceId);
+      },
     );
   }, [controller, workspaceId]);
   useEffect(loadCategories, [loadCategories]);
@@ -67,6 +70,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     let code: AssistantErrorCode | null;
     if (!online) code = "offline";
     else if (snapshot.lock !== null) code = snapshot.lock;
+    else if (snapshot.categoriesFailed) code = "internal";
     else if (snapshot.stepLimitHit) code = "step_limit";
     else code = error === undefined ? null : parseAssistantError(error);
     const spec = code === null ? null : ASSISTANT_ERRORS[code];
@@ -86,14 +90,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       composerDisabled: !online || snapshot.lock !== null,
       send: (text: string) => report(controller.send(text), "send"),
       stop: () => report(controller.stop(), "stop"),
-      retry: () => report(controller.retry(), "retry"),
+      // A failed category load is retried by loading again, not by re-sending the chat.
+      retry: () => (snapshot.categoriesFailed ? loadCategories() : report(controller.retry(), "retry")),
       money: controller.money,
       proposals: snapshot.proposals,
       resolving: snapshot.resolving,
       confirm: (toolCallId: string) => report(controller.confirm(toolCallId), "confirm"),
       cancel: (toolCallId: string) => report(controller.cancel(toolCallId), "cancel"),
     };
-  }, [controller, error, messages, online, open, snapshot, status]);
+  }, [controller, error, loadCategories, messages, online, open, snapshot, status]);
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }
