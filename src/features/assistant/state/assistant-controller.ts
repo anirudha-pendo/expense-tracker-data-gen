@@ -108,8 +108,9 @@ export class AssistantController {
     }
   }
 
+  // A failed refresh keeps the last good categories; only a first load that fails blocks the chat.
   markCategoriesFailed(workspaceId: string): void {
-    if (workspaceId !== this.session.workspaceId) return;
+    if (workspaceId !== this.session.workspaceId || this.snapshot.categoriesLoaded) return;
     this.update({ categoriesFailed: true });
   }
 
