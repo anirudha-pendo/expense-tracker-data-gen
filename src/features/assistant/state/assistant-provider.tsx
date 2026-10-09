@@ -88,6 +88,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       stop: () => report(controller.stop(), "stop"),
       retry: () => report(controller.retry(), "retry"),
       money: controller.money,
+      proposals: snapshot.proposals,
+      resolving: snapshot.resolving,
+      confirm: (toolCallId: string) => report(controller.confirm(toolCallId), "confirm"),
+      cancel: (toolCallId: string) => report(controller.cancel(toolCallId), "cancel"),
     };
   }, [controller, error, messages, online, open, snapshot, status]);
 

@@ -30,3 +30,8 @@ export async function deleteTransaction(id: string): Promise<void> {
   }
   await tx.done;
 }
+
+export async function getTransactionById(id: string): Promise<Transaction | undefined> {
+  const db = await getDB();
+  return db.get("transactions", id);
+}

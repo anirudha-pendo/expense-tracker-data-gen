@@ -1,14 +1,22 @@
 import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { Category } from "@/types";
+import { localIsoDate } from "@/lib/dates";
 import { parseAssistantError } from "../contract/errors";
 import { ASSISTANT_LIMITS } from "../contract/limits";
-import { localIsoDate } from "@/lib/dates";
-import { buildRequestContext, canAutoSendAgain, retryStrategy, takeRecentMessages } from "../lib/conversation";
+import type { CancelReason } from "../contract/types";
+import { applyTransactionProposal, StaleWriteError } from "../executors/transactions";
+import {
+  buildRequestContext,
+  canAutoSendAgain,
+  retryStrategy,
+  seenIdsFromTool,
+  takeRecentMessages,
+} from "../lib/conversation";
 import { currentTimeZone } from "../lib/intl";
 import type { MoneyFormat } from "../lib/money";
 import type { AssistantUIMessage } from "../types";
-import { handleAssistantToolCall, type ToolRunnerDeps } from "./tool-runner";
+import { handleAssistantToolCall, type ProposalEntry, type ToolRunnerDeps } from "./tool-runner";
 
 export type SessionLock = "not_configured" | "provider_quota_exhausted";
 
@@ -20,6 +28,8 @@ export interface ControllerSnapshot {
   stoppedTurn: boolean;
   pendingCalls: number;
   categoriesLoaded: boolean;
+  proposals: ReadonlyMap<string, ProposalEntry>;
+  resolving: ReadonlySet<string>;
 }
 
 export interface SessionInput {
@@ -34,6 +44,9 @@ export class AssistantController {
   private readonly listeners = new Set<() => void>();
   private session: SessionInput;
   private categories: readonly Category[] = [];
+  // Card ids already confirmed or cancelled; claimed synchronously so a double click cannot write twice.
+  private readonly claimed = new Set<string>();
+  private superseding = false;
 
   constructor(initial: SessionInput) {
     this.session = initial;
@@ -63,6 +76,8 @@ export class AssistantController {
       stoppedTurn: false,
       pendingCalls: 0,
       categoriesLoaded: false,
+      proposals: new Map(),
+      resolving: new Set(),
     };
   }
 
@@ -72,6 +87,8 @@ export class AssistantController {
     if (key === this.snapshot.sessionKey) return;
     const previous = this.snapshot.chat;
     this.categories = [];
+    this.claimed.clear();
+    this.superseding = false;
     this.snapshot = this.freshSnapshot(key);
     for (const listener of this.listeners) listener();
     previous.stop().catch((error: unknown) => console.error("assistant: could not stop the previous chat", error));
@@ -88,7 +105,7 @@ export class AssistantController {
   }
 
   private shouldAutoSend(messages: AssistantUIMessage[]): boolean {
-    if (this.snapshot.stoppedTurn) return false;
+    if (this.superseding || this.snapshot.stoppedTurn) return false;
     if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) return false;
     const last = messages.at(-1);
     if (last !== undefined && !canAutoSendAgain(last.parts)) {
@@ -98,11 +115,15 @@ export class AssistantController {
     return true;
   }
 
-  // Bound to one chat so a tool finishing after a workspace switch cannot touch the new chat's count.
+  // Bound to one chat so a tool finishing after a workspace switch cannot touch the new chat's state.
   private toolDepsFor(chat: Chat<AssistantUIMessage>): ToolRunnerDeps {
     const adjust = (delta: number) => {
       if (this.snapshot.chat !== chat) return;
       this.update({ pendingCalls: Math.max(0, this.snapshot.pendingCalls + delta) });
+    };
+    const propose = (entry: ProposalEntry) => {
+      if (this.snapshot.chat !== chat) return;
+      this.update({ proposals: new Map(this.snapshot.proposals).set(entry.toolCallId, entry) });
     };
     return {
       session: () =>
@@ -111,6 +132,8 @@ export class AssistantController {
           : { workspaceId: this.session.workspaceId, money: this.session.money, today: localIsoDate(new Date()) },
       beginCall: () => adjust(1),
       endCall: () => adjust(-1),
+      seenTransactionIds: () => seenIdsFromTool(chat.messages, "findTransactions", "transactions"),
+      propose,
     };
   }
 
@@ -146,8 +169,63 @@ export class AssistantController {
     if (this.snapshot.stepLimitHit || this.snapshot.stoppedTurn) this.update({ stepLimitHit: false, stoppedTurn: false });
   }
 
+  private isPending(toolCallId: string): boolean {
+    const last = this.snapshot.chat.lastMessage;
+    return (
+      last !== undefined &&
+      last.parts.some((p) => "toolCallId" in p && p.toolCallId === toolCallId && p.state === "input-available")
+    );
+  }
+
+  private setResolving(chat: Chat<AssistantUIMessage>, toolCallId: string, on: boolean): void {
+    if (this.snapshot.chat !== chat) return;
+    const next = new Set(this.snapshot.resolving);
+    if (on) next.add(toolCallId);
+    else next.delete(toolCallId);
+    this.update({ resolving: next });
+  }
+
+  async confirm(toolCallId: string): Promise<void> {
+    const entry = this.snapshot.proposals.get(toolCallId);
+    const workspaceId = this.session.workspaceId;
+    if (entry === undefined || workspaceId === null || this.claimed.has(toolCallId) || !this.isPending(toolCallId)) return;
+    this.claimed.add(toolCallId);
+    const chat = this.snapshot.chat;
+    this.setResolving(chat, toolCallId, true);
+    try {
+      const id = await applyTransactionProposal(workspaceId, entry.proposal);
+      await chat.addToolOutput({ tool: entry.tool, toolCallId, output: { status: "confirmed", id } });
+    } catch (error) {
+      if (!(error instanceof StaleWriteError)) console.error("assistant: write failed", error);
+      const errorText = error instanceof StaleWriteError ? error.message : "The change could not be saved.";
+      await chat.addToolOutput({ tool: entry.tool, toolCallId, state: "output-error", errorText });
+    } finally {
+      this.setResolving(chat, toolCallId, false);
+    }
+  }
+
+  async cancel(toolCallId: string, reason: CancelReason = "user"): Promise<void> {
+    const entry = this.snapshot.proposals.get(toolCallId);
+    if (entry === undefined || this.claimed.has(toolCallId) || !this.isPending(toolCallId)) return;
+    this.claimed.add(toolCallId);
+    await this.snapshot.chat.addToolOutput({ tool: entry.tool, toolCallId, output: { status: "cancelled", reason } });
+  }
+
+  // Resolves open cards without letting each resolution trigger its own follow-up request.
+  private async supersedePending(): Promise<void> {
+    const pending = [...this.snapshot.proposals.keys()].filter((id) => this.isPending(id));
+    if (pending.length === 0) return;
+    this.superseding = true;
+    try {
+      for (const id of pending) await this.cancel(id, "superseded");
+    } finally {
+      this.superseding = false;
+    }
+  }
+
   async send(text: string): Promise<void> {
     this.startTurn();
+    await this.supersedePending();
     await this.snapshot.chat.sendMessage({ text });
   }
 

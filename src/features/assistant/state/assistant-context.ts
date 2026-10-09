@@ -3,6 +3,7 @@ import type { ChatStatus } from "ai";
 import type { AlertVariant, AssistantErrorCode } from "../contract/errors";
 import type { MoneyFormat } from "../lib/money";
 import type { AssistantUIMessage } from "../types";
+import type { ProposalEntry } from "./tool-runner";
 
 export interface AssistantAlert {
   code: AssistantErrorCode;
@@ -24,6 +25,10 @@ export interface AssistantContextValue {
   stop: () => void;
   retry: () => void;
   money: MoneyFormat;
+  proposals: ReadonlyMap<string, ProposalEntry>;
+  resolving: ReadonlySet<string>;
+  confirm: (toolCallId: string) => void;
+  cancel: (toolCallId: string) => void;
 }
 
 export const AssistantContext = createContext<AssistantContextValue | null>(null);

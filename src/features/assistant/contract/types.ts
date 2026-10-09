@@ -87,7 +87,7 @@ export interface DeleteTransactionInput {
   transactionId: string;
 }
 
-export type CancelReason = "user" | "superseded" | "expired";
+export type CancelReason = "user" | "superseded";
 
 export type WriteToolOutput = { status: "confirmed"; id: string } | { status: "cancelled"; reason: CancelReason };
 
