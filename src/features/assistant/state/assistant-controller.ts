@@ -1,0 +1,151 @@
+import { Chat } from "@ai-sdk/react";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
+import type { Category } from "@/types";
+import { parseAssistantError } from "../contract/errors";
+import { ASSISTANT_LIMITS } from "../contract/limits";
+import { buildRequestContext, canAutoSendAgain, retryStrategy, takeRecentMessages } from "../lib/conversation";
+import { currentTimeZone } from "../lib/intl";
+import type { MoneyFormat } from "../lib/money";
+import type { AssistantUIMessage } from "../types";
+
+export type SessionLock = "not_configured" | "provider_quota_exhausted";
+
+export interface ControllerSnapshot {
+  chat: Chat<AssistantUIMessage>;
+  sessionKey: string;
+  lock: SessionLock | null;
+  stepLimitHit: boolean;
+  stoppedTurn: boolean;
+  pendingCalls: number;
+  categoriesLoaded: boolean;
+}
+
+export interface SessionInput {
+  workspaceId: string | null;
+  money: MoneyFormat;
+}
+
+const SIGNED_OUT = "signed-out";
+
+export class AssistantController {
+  private snapshot: ControllerSnapshot;
+  private readonly listeners = new Set<() => void>();
+  private session: SessionInput;
+  private categories: readonly Category[] = [];
+
+  constructor(initial: SessionInput) {
+    this.session = initial;
+    this.snapshot = this.freshSnapshot(initial.workspaceId ?? SIGNED_OUT);
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  getSnapshot = (): ControllerSnapshot => this.snapshot;
+
+  private update(patch: Partial<ControllerSnapshot>): void {
+    this.snapshot = { ...this.snapshot, ...patch };
+    for (const listener of this.listeners) listener();
+  }
+
+  private freshSnapshot(sessionKey: string): ControllerSnapshot {
+    return {
+      chat: this.createChat(),
+      sessionKey,
+      lock: null,
+      stepLimitHit: false,
+      stoppedTurn: false,
+      pendingCalls: 0,
+      categoriesLoaded: false,
+    };
+  }
+
+  syncSession(input: SessionInput): void {
+    this.session = input;
+    const key = input.workspaceId ?? SIGNED_OUT;
+    if (key === this.snapshot.sessionKey) return;
+    const previous = this.snapshot.chat;
+    this.categories = [];
+    this.snapshot = this.freshSnapshot(key);
+    for (const listener of this.listeners) listener();
+    previous.stop().catch((error: unknown) => console.error("assistant: could not stop the previous chat", error));
+  }
+
+  setCategories(workspaceId: string, categories: readonly Category[]): void {
+    if (workspaceId !== this.session.workspaceId) return;
+    this.categories = categories;
+    if (!this.snapshot.categoriesLoaded) this.update({ categoriesLoaded: true });
+  }
+
+  get money(): MoneyFormat {
+    return this.session.money;
+  }
+
+  private shouldAutoSend(messages: AssistantUIMessage[]): boolean {
+    if (this.snapshot.stoppedTurn) return false;
+    if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) return false;
+    const last = messages.at(-1);
+    if (last !== undefined && !canAutoSendAgain(last.parts)) {
+      this.update({ stepLimitHit: true });
+      return false;
+    }
+    return true;
+  }
+
+  private reportError(error: Error): void {
+    const code = parseAssistantError(error);
+    if (code === "not_configured" || code === "provider_quota_exhausted") this.update({ lock: code });
+  }
+
+  private createChat(): Chat<AssistantUIMessage> {
+    return new Chat<AssistantUIMessage>({
+      transport: new DefaultChatTransport<AssistantUIMessage>({
+        api: "/api/chat",
+        prepareSendMessagesRequest: ({ id, messages }) => ({
+          body: {
+            id,
+            messages: takeRecentMessages(messages, ASSISTANT_LIMITS.maxMessages),
+            context: buildRequestContext(
+              { categories: this.categories, currency: this.session.money.currency, locale: this.session.money.locale },
+              new Date(),
+              currentTimeZone(),
+            ),
+          },
+        }),
+      }),
+      onError: (error) => this.reportError(error),
+      sendAutomaticallyWhen: ({ messages }) => this.shouldAutoSend(messages),
+    });
+  }
+
+  private startTurn(): void {
+    if (this.snapshot.stepLimitHit || this.snapshot.stoppedTurn) this.update({ stepLimitHit: false, stoppedTurn: false });
+  }
+
+  async send(text: string): Promise<void> {
+    this.startTurn();
+    await this.snapshot.chat.sendMessage({ text });
+  }
+
+  async stop(): Promise<void> {
+    const chat = this.snapshot.chat;
+    const streaming = chat.status === "submitted" || chat.status === "streaming";
+    this.update({ stoppedTurn: true });
+    await chat.stop();
+    const last = chat.lastMessage;
+    if (streaming && last !== undefined && last.role === "assistant") {
+      chat.messages = chat.messages.map((m) => (m.id === last.id ? { ...m, metadata: { ...m.metadata, stopped: true } } : m));
+    }
+  }
+
+  async retry(): Promise<void> {
+    this.startTurn();
+    const chat = this.snapshot.chat;
+    if (retryStrategy(chat.messages) === "continue") await chat.sendMessage();
+    else await chat.regenerate();
+  }
+}

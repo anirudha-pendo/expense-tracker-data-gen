@@ -94,8 +94,5 @@ export type WriteToolOutput = { status: "confirmed"; id: string } | { status: "c
 export interface AssistantMessageMetadata {
   model?: string;
   promptVersion?: string;
-  source?: "typed" | "suggested";
-  feedback?: "up" | "down";
   stopped?: boolean;
-  undoNote?: boolean;
 }
