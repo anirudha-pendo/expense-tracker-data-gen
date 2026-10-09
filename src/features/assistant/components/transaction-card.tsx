@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -51,12 +51,20 @@ interface TransactionCardProps {
 
 export function TransactionCard({ entry, state, resolving, money, onConfirm, onCancel }: TransactionCardProps) {
   const titleId = useId();
+  const groupRef = useRef<HTMLDivElement>(null);
   const { proposal } = entry;
+
+  // A card waiting on the user must not sit below the fold.
+  useEffect(() => {
+    if (state !== "running") return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    groupRef.current?.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+  }, [state]);
   const outcome = state === "running" ? null : OUTCOME[state];
 
   return (
     <BpBox noMarks>
-      <div role="group" aria-labelledby={titleId}>
+      <div ref={groupRef} role="group" aria-labelledby={titleId}>
         <div className="flex items-baseline justify-between border-b border-border/40 px-4 py-2">
           <span id={titleId} className="font-mono text-[10px] tracking-widest uppercase text-muted-foreground">
             {WRITE_CARD_TITLES[entry.tool]}
