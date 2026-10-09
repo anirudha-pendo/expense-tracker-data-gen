@@ -338,6 +338,20 @@ export const QUICK_ADD_SHORTCUT_RATE = 0.5;
 /** How long the command palette gets to lazily load the workspace's categories and render its chips. Shorter than DIALOG_TIMEOUT_MS on purpose: a palette with genuinely no matching category should fail fast and say so, not sit out a full dialog timeout. */
 export const QUICK_ADD_CHIPS_TIMEOUT_MS = 5000;
 
+// --- Assistant ----------------------------------------------------------------
+
+/** Chance the assistant panel is opened with Ctrl+J rather than the header button. */
+export const ASSISTANT_SHORTCUT_RATE = 0.3;
+/** Prompts sent per askAssistant action. */
+export const ASSISTANT_PROMPTS_MIN = 1;
+export const ASSISTANT_PROMPTS_MAX = 3;
+/** How long one reply (including its tool rounds) gets before the action fails. */
+export const ASSISTANT_RESPONSE_TIMEOUT_MS = 60000;
+/** Chance a confirm card is confirmed rather than cancelled. */
+export const ASSISTANT_CONFIRM_RATE = 0.75;
+/** Confirm cards resolved per prompt before the action gives up on a model that keeps proposing. */
+export const ASSISTANT_MAX_CARDS_PER_PROMPT = 3;
+
 // --- Insights dwell ---------------------------------------------------------
 //
 // `readInsights` exists purely to produce time-on-page data, so its dwell is
@@ -486,6 +500,7 @@ export const NEW_VISITOR_ACTIONS: ActionName[] = [
   "updateWorkspace",
   "useQuickAdd",
   "readInsights",
+  "askAssistant",
 ];
 
 /** Chance the sign-up form's show/hide password toggle gets clicked. */

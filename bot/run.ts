@@ -658,6 +658,7 @@ async function runOneSession(
         ? NEW_VISITOR_ABANDON_RATE
         : ARCHETYPES[planned.persona.archetype].abandonRate,
     log,
+    assistantOff: false,
   };
 
   let context: BrowserContext | null = null;
