@@ -25,7 +25,12 @@ Stack facts that affect selector strategy:
 | `/settings` | `ProtectedRoute` | `SettingsPage` | `<h1>` "Settings"; 5 section header labels: "Profile", "Workspace", "Categories", "Budgets", "Data" |
 | `*` | — | redirects to `/` | — |
 
-`vercel.json` rewrites every path **except `/api/*`** to `index.html` (`"/((?!api/).*)"`). `POST /api/chat` is the assistant's Vercel Function; Vite (`npm run dev`) does not serve it — use `vercel dev` (port 3000) to exercise the assistant locally.
+`vercel.json` rewrites every path **except `/api/*`** to `index.html` (`"/((?!api/).*)"`). `POST /api/chat` is the assistant's Vercel Function; Vite (`npm run dev`) does not serve it. To exercise the assistant locally, run `vercel dev` with two adjustments, both proven on this branch:
+
+- Pass an empty config kept **outside the repo** (a file containing `{}`): `vercel dev -A /path/outside/repo/vercel.empty.json`. With the repo's `vercel.json`, the rewrite also catches Vite's dev module requests (`/src/main.tsx`, `/@vite/client`), so the app renders blank.
+- Export `ANTHROPIC_API_KEY` in that shell before starting it. `vercel dev` does not pass `.env.local` to the function (it answers 503 `not_configured`). Never print, log or commit the value.
+
+The app is then at `http://localhost:3000` (choose another port with `--listen` if 3000 is taken).
 
 `ProtectedRoute` / `GuestGuard` / `WorkspaceGuard` render `null` while `isLoading` (session bootstrap from IndexedDB) — the bot should wait for either a redirect or a landmark, not assume instant render.
 
