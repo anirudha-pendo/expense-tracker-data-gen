@@ -1,4 +1,4 @@
-import { startOfMonth, endOfMonth } from "date-fns";
+import { isInMonth, parseCalendarDate } from "@/lib/dates";
 import type { Budget, Transaction } from "@/types";
 
 export const WARNING_THRESHOLD = 0.8;
@@ -16,14 +16,8 @@ export function sumCategoryMonthSpend(
   categoryId: string,
   monthOf: Date
 ): number {
-  const start = startOfMonth(monthOf);
-  const end = endOfMonth(monthOf);
   return transactions
-    .filter((t) => {
-      if (t.type !== "expense" || t.categoryId !== categoryId) return false;
-      const d = new Date(t.date);
-      return d >= start && d <= end;
-    })
+    .filter((t) => t.type === "expense" && t.categoryId === categoryId && isInMonth(t.date, monthOf))
     .reduce((sum, t) => sum + t.amount, 0);
 }
 
@@ -39,7 +33,7 @@ export function checkBudgetThresholds(
   const budget = budgets.find((b) => b.categoryId === newTransaction.categoryId);
   if (!budget || budget.monthlyLimit <= 0) return null;
 
-  const txDate = new Date(newTransaction.date);
+  const txDate = parseCalendarDate(newTransaction.date);
   const before = sumCategoryMonthSpend(transactions, newTransaction.categoryId, txDate);
   const after = before + newTransaction.amount;
 

@@ -1,11 +1,5 @@
-import {
-  endOfMonth,
-  getDate,
-  getDaysInMonth,
-  isSameMonth,
-  startOfMonth,
-  subMonths,
-} from "date-fns";
+import { getDate, getDaysInMonth, subMonths } from "date-fns";
+import { isInMonth } from "@/lib/dates";
 import type { Budget, Category, Transaction } from "@/types";
 
 // Tuning constants — adjust these to change insight sensitivity.
@@ -55,33 +49,23 @@ export interface HealthScore {
 }
 
 function monthExpensesByCategory(transactions: Transaction[], monthOf: Date): Map<string, number> {
-  const start = startOfMonth(monthOf);
-  const end = endOfMonth(monthOf);
   const map = new Map<string, number>();
   for (const t of transactions) {
-    if (t.type !== "expense") continue;
-    const d = new Date(t.date);
-    if (d < start || d > end) continue;
+    if (t.type !== "expense" || !isInMonth(t.date, monthOf)) continue;
     map.set(t.categoryId, (map.get(t.categoryId) ?? 0) + t.amount);
   }
   return map;
 }
 
 function monthTotal(transactions: Transaction[], monthOf: Date, type: Transaction["type"]): number {
-  const start = startOfMonth(monthOf);
-  const end = endOfMonth(monthOf);
   return transactions
-    .filter((t) => {
-      if (t.type !== type) return false;
-      const d = new Date(t.date);
-      return d >= start && d <= end;
-    })
+    .filter((t) => t.type === type && isInMonth(t.date, monthOf))
     .reduce((sum, t) => sum + t.amount, 0);
 }
 
 /** True when the workspace has any transaction dated in the given month. */
 function hasActivityInMonth(transactions: Transaction[], monthOf: Date): boolean {
-  return transactions.some((t) => isSameMonth(new Date(t.date), monthOf));
+  return transactions.some((t) => isInMonth(t.date, monthOf));
 }
 
 export function forecastEndOfMonth(transactions: Transaction[], now: Date): Forecast {
@@ -173,14 +157,8 @@ export function detectAnomalies(
 }
 
 export function largestExpenses(transactions: Transaction[], now: Date): Transaction[] {
-  const start = startOfMonth(now);
-  const end = endOfMonth(now);
   return transactions
-    .filter((t) => {
-      if (t.type !== "expense") return false;
-      const d = new Date(t.date);
-      return d >= start && d <= end;
-    })
+    .filter((t) => t.type === "expense" && isInMonth(t.date, now))
     .sort((a, b) => b.amount - a.amount)
     .slice(0, LARGEST_EXPENSES_COUNT);
 }

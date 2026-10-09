@@ -1,3 +1,5 @@
+import { parseCalendarDate } from "./dates.js";
+
 export function formatCurrency(amount: number, currency: string, locale: string): string {
   return new Intl.NumberFormat(locale, {
     style: "currency",
@@ -11,5 +13,5 @@ export function formatDate(dateString: string, locale: string): string {
     year: "numeric",
     month: "short",
     day: "numeric",
-  }).format(new Date(dateString));
+  }).format(parseCalendarDate(dateString));
 }
