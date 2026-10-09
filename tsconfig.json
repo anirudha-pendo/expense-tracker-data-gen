@@ -4,5 +4,7 @@
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.api.json" }
-  ]
+  ],
+  // Vercel typechecks api/ with this root file; TypeScript 6 no longer loads @types/node on its own.
+  "compilerOptions": { "types": ["node"] }
 }
