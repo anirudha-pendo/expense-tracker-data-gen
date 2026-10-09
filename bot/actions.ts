@@ -1174,11 +1174,7 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
 let assistantOffForRun = false;
 const RUN_ENDING_ALERTS = [errorCopy("not_configured"), errorCopy("provider_quota_exhausted")];
 
-export function isAssistantOffForRun(): boolean {
-  return assistantOffForRun;
-}
-
-export function buildAssistantPrompt(
+function buildAssistantPrompt(
   rng: Rng,
   categories: readonly CategorySeed[],
 ): { intent: AssistantPromptIntent; text: string } {

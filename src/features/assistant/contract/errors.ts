@@ -15,12 +15,10 @@ export const ASSISTANT_ERROR_CODES = [
 export type AssistantErrorCode = (typeof ASSISTANT_ERROR_CODES)[number];
 export type ClientErrorCode = "offline" | "step_limit";
 export type ServerErrorCode = Exclude<AssistantErrorCode, ClientErrorCode>;
-export type ComposerEffect = "enabled" | "disabled-session" | "disabled-until-online";
 export type AlertVariant = "default" | "destructive";
 
 interface ErrorSpecBase {
   retryable: boolean;
-  composer: ComposerEffect;
   alert: AlertVariant | null;
   copy: string;
 }
@@ -35,53 +33,47 @@ const BUSY_COPY = "The assistant is busy right now. Try again in a minute.";
 const FAILED_COPY = "The assistant could not answer. Try again.";
 
 export const SERVER_ERRORS: Record<ServerErrorCode, ServerErrorSpec> = {
-  method_not_allowed: { http: 405, retryable: false, composer: "enabled", alert: null, copy: "Use POST." },
+  method_not_allowed: { http: 405, retryable: false, alert: null, copy: "Use POST." },
   payload_too_large: {
     http: 413,
     retryable: false,
-    composer: "enabled",
     alert: "destructive",
     copy: "That conversation is too long to send. Reload the page to start over.",
   },
   bad_request: {
     http: 400,
     retryable: false,
-    composer: "enabled",
     alert: "destructive",
     copy: "That message couldn't be sent. Reload the page if this keeps happening.",
   },
   not_configured: {
     http: 503,
     retryable: false,
-    composer: "disabled-session",
     alert: "default",
     copy: "The assistant isn't set up yet.",
   },
-  provider_rate_limited: { http: 429, retryable: true, composer: "enabled", alert: "default", copy: BUSY_COPY },
+  provider_rate_limited: { http: 429, retryable: true, alert: "default", copy: BUSY_COPY },
   provider_quota_exhausted: {
     http: 503,
     retryable: false,
-    composer: "disabled-session",
     alert: "default",
     copy: "The assistant has reached its usage limit. Try again later.",
   },
-  provider_overloaded: { http: 503, retryable: true, composer: "enabled", alert: "default", copy: BUSY_COPY },
-  provider_error: { http: 502, retryable: true, composer: "enabled", alert: "destructive", copy: FAILED_COPY },
-  internal: { http: 500, retryable: true, composer: "enabled", alert: "destructive", copy: FAILED_COPY },
+  provider_overloaded: { http: 503, retryable: true, alert: "default", copy: BUSY_COPY },
+  provider_error: { http: 502, retryable: true, alert: "destructive", copy: FAILED_COPY },
+  internal: { http: 500, retryable: true, alert: "destructive", copy: FAILED_COPY },
 };
 
 export const CLIENT_ERRORS: Record<ClientErrorCode, AssistantErrorSpec> = {
   offline: {
     http: null,
     retryable: true,
-    composer: "disabled-until-online",
     alert: "default",
     copy: "You're offline. Reconnect to use the assistant.",
   },
   step_limit: {
     http: null,
     retryable: true,
-    composer: "enabled",
     alert: "default",
     copy: "Stopped after several steps. Try asking more specifically.",
   },
