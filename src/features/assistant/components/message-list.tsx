@@ -30,7 +30,7 @@ function EmptyState() {
 }
 
 export function MessageList() {
-  const { messages, busy, status } = useAssistant();
+  const { messages, busy, status, stoppedBeforeReply } = useAssistant();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
   const last = messages.at(-1);
@@ -69,7 +69,9 @@ export function MessageList() {
         {messages.length === 0 ? (
           <EmptyState />
         ) : (
-          messages.map((message) => <MessageItem key={message.id} message={message} />)
+          messages.map((message) => (
+            <MessageItem key={message.id} message={message} stoppedBeforeReply={stoppedBeforeReply.has(message.id)} />
+          ))
         )}
         {thinking && (
           <div className="flex items-center gap-2 text-muted-foreground">

@@ -29,6 +29,7 @@ export interface AssistantContextValue {
   resolving: ReadonlySet<string>;
   confirm: (toolCallId: string) => void;
   cancel: (toolCallId: string) => void;
+  stoppedBeforeReply: ReadonlySet<string>;
 }
 
 export const AssistantContext = createContext<AssistantContextValue | null>(null);

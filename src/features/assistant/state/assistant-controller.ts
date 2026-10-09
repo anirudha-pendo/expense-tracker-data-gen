@@ -33,6 +33,7 @@ export interface ControllerSnapshot {
   categoriesFailed: boolean;
   proposals: ReadonlyMap<string, ProposalEntry>;
   resolving: ReadonlySet<string>;
+  stoppedBeforeReply: ReadonlySet<string>;
 }
 
 export interface SessionInput {
@@ -82,6 +83,7 @@ export class AssistantController {
       categoriesFailed: false,
       proposals: new Map(),
       resolving: new Set(),
+      stoppedBeforeReply: new Set(),
     };
   }
 
@@ -247,6 +249,9 @@ export class AssistantController {
     this.update({ stoppedTurn: true });
     await chat.stop();
     const last = chat.lastMessage;
+    if (streaming && last !== undefined && last.role === "user" && chat === this.snapshot.chat) {
+      this.update({ stoppedBeforeReply: new Set(this.snapshot.stoppedBeforeReply).add(last.id) });
+    }
     if (streaming && last !== undefined && last.role === "assistant") {
       chat.messages = chat.messages.map((m) => (m.id === last.id ? { ...m, metadata: { ...m.metadata, stopped: true } } : m));
     }
@@ -255,6 +260,12 @@ export class AssistantController {
   async retry(): Promise<void> {
     this.startTurn();
     const chat = this.snapshot.chat;
+    const last = chat.lastMessage;
+    if (last !== undefined && this.snapshot.stoppedBeforeReply.has(last.id)) {
+      const next = new Set(this.snapshot.stoppedBeforeReply);
+      next.delete(last.id);
+      this.update({ stoppedBeforeReply: next });
+    }
     if (retryStrategy(chat.messages) === "continue") await chat.sendMessage();
     else await chat.regenerate();
   }

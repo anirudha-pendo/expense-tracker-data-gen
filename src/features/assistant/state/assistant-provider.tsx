@@ -97,6 +97,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       resolving: snapshot.resolving,
       confirm: (toolCallId: string) => report(controller.confirm(toolCallId), "confirm"),
       cancel: (toolCallId: string) => report(controller.cancel(toolCallId), "cancel"),
+      stoppedBeforeReply: snapshot.stoppedBeforeReply,
     };
   }, [controller, error, loadCategories, messages, online, open, snapshot, status]);
 

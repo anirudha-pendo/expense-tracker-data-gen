@@ -38,19 +38,26 @@ function AssistantPartView({ part }: { part: AssistantPart }) {
   return null;
 }
 
-export function MessageItem({ message }: { message: AssistantUIMessage }) {
+function StoppedHint() {
+  return <span className="font-mono text-[10px] tracking-wider text-muted-foreground/60">stopped</span>;
+}
+
+export function MessageItem({ message, stoppedBeforeReply }: { message: AssistantUIMessage; stoppedBeforeReply: boolean }) {
   if (message.role === "user") {
     const text = message.parts
       .filter(isTextUIPart)
       .map((p) => p.text)
       .join("\n");
     return (
-      <div
-        data-message-role="user"
-        className="stagger-item ml-auto max-w-[85%] whitespace-pre-wrap border border-border/60 bg-muted/40 px-3 py-2 text-sm"
-      >
-        {text}
-      </div>
+      <>
+        <div
+          data-message-role="user"
+          className="stagger-item ml-auto max-w-[85%] whitespace-pre-wrap border border-border/60 bg-muted/40 px-3 py-2 text-sm"
+        >
+          {text}
+        </div>
+        {stoppedBeforeReply && <StoppedHint />}
+      </>
     );
   }
   return (
@@ -58,9 +65,7 @@ export function MessageItem({ message }: { message: AssistantUIMessage }) {
       {message.parts.map((part, index) => (
         <AssistantPartView key={`${message.id}-${index}`} part={part} />
       ))}
-      {message.metadata?.stopped === true && (
-        <span className="font-mono text-[10px] tracking-wider text-muted-foreground/60">stopped</span>
-      )}
+      {message.metadata?.stopped === true && <StoppedHint />}
     </div>
   );
 }
