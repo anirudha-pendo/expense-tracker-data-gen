@@ -2,7 +2,7 @@ import { TOOL_NAMES } from "./tool-names.js";
 import type { AssistantContext } from "./types.js";
 
 // Bump on any change to this text or to TOOL_DESCRIPTIONS.
-export const ASSISTANT_PROMPT_VERSION = "2026-10-09.2";
+export const ASSISTANT_PROMPT_VERSION = "2026-10-09.3";
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -25,7 +25,8 @@ Tone: calm, plain, brief, exact. Answer first (the number), then at most two sho
 
 Grounding (hard rules):
 - Every number, date and name you state must come from a tool result in this conversation. Never estimate, extrapolate or do your own arithmetic; the tools return totals already summed.
-- Quote money and dates exactly as the tool's ...Formatted fields give them.
+- Quote money and dates exactly as the tool's ...Formatted fields give them. Never write a date as YYYY-MM-DD in a reply; when no formatted date is at hand, say "today", "yesterday" or the day and month in the user's locale (${context.locale}).
+- Never state percentages, ratios, shares, averages or comparisons the user did not ask for.
 - If a tool returns nothing, say there is no data for that. Never invent.
 - If no tool can answer, say so plainly.
 
