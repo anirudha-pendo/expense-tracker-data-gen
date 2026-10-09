@@ -38,6 +38,11 @@ export const findTransactionsInputSchema: z.ZodType<FindTransactionsInput> = z.o
   to: isoDate.optional(),
   minAmount: z.number().min(0).max(ASSISTANT_LIMITS.maxAmount).optional(),
   maxAmount: z.number().min(0).max(ASSISTANT_LIMITS.maxAmount).optional(),
+  sortBy: z
+    .enum(["date", "amount"])
+    .optional()
+    .describe("date (default) or amount. Use amount for biggest, smallest or top-N questions."),
+  order: z.enum(["desc", "asc"]).optional().describe("desc (default): newest or largest first. asc: oldest or smallest first."),
   limit: z.number().int().min(1).max(ASSISTANT_LIMITS.maxListRows).optional().describe("Rows to return, 1-20. Default 10."),
 });
 
@@ -76,7 +81,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   [TOOL_NAMES.getSpendingSummary]:
     "Totals of the user's expenses (default) or income between two dates, overall and per category, with pre-formatted amounts. Use for any how-much or where-did-my-money-go question.",
   [TOOL_NAMES.findTransactions]:
-    "Search the user's transactions by text, category, type, date range or amount. Newest first. Use it to show transactions and always before editing or deleting one. totalMatches counts every match, returned counts the rows listed; when truncated is true, more matched than are listed, so narrow the search instead of guessing about unlisted rows.",
+    "Search the user's transactions by text, category, type, date range or amount. Newest first by default; sortBy amount lists the largest (order desc) or smallest (order asc) first. Use it to show transactions and always before editing or deleting one. totalMatches counts every match, returned counts the rows listed; when truncated is true, more matched than are listed, so narrow the search instead of guessing about unlisted rows.",
   [TOOL_NAMES.addTransaction]:
     "Propose a new transaction. The app shows a confirm card; nothing is saved unless the user confirms. Omit type to infer it from the category.",
   [TOOL_NAMES.updateTransaction]:

@@ -102,6 +102,14 @@ export function summarizeSpending(args: ComputeArgs<GetSpendingSummaryInput>): V
   };
 }
 
+// Deterministic order: ties fall back to newest day, newest created, then id.
+function compareFound(a: Transaction, b: Transaction, input: FindTransactionsInput): number {
+  const direction = input.order === "asc" ? 1 : -1;
+  const primary = input.sortBy === "amount" ? a.amount - b.amount : day(a).localeCompare(day(b));
+  if (primary !== 0) return primary * direction;
+  return day(b).localeCompare(day(a)) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+}
+
 function byteSize(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
@@ -130,7 +138,7 @@ export function findTransactionsIn(args: ComputeArgs<FindTransactionsInput>): Va
         (input.maxAmount === undefined || t.amount <= input.maxAmount) &&
         (text === undefined || `${t.description} ${t.notes}`.toLowerCase().includes(text)),
     )
-    .sort((a, b) => (day(a) === day(b) ? b.createdAt.localeCompare(a.createdAt) : day(b).localeCompare(day(a))));
+    .sort((a, b) => compareFound(a, b, input));
 
   const limit = Math.min(input.limit ?? ASSISTANT_LIMITS.defaultListRows, ASSISTANT_LIMITS.maxListRows);
   const rows: FoundTransaction[] = matched.slice(0, limit).map((t) => {

@@ -45,6 +45,8 @@ export interface FindTransactionsInput {
   to?: string;
   minAmount?: number;
   maxAmount?: number;
+  sortBy?: "date" | "amount";
+  order?: "desc" | "asc";
   limit?: number;
 }
 
