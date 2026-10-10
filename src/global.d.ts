@@ -16,6 +16,7 @@ interface PendoSDK {
   updateOptions(options: PendoOptions): void;
   clearSession(): void;
   track(eventName: string, properties?: Record<string, unknown>): void;
+  trackAgent(type: string, props: Record<string, unknown>, eventProperties?: Record<string, unknown>): void;
   pageLoad(): void;
 }
 

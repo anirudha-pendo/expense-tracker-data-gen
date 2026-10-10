@@ -57,3 +57,30 @@ export function identify(user: User, workspace: Workspace | null): void {
 export function updateOptions(user: User, workspace: Workspace | null): void {
   pendo?.updateOptions(buildIdentifyOptions(user, workspace));
 }
+
+const ASSISTANT_AGENT_ID = "ledger-assistant";
+
+export interface AgentEventProps {
+  conversationId: string;
+  messageId: string;
+  content: string;
+  modelUsed: string;
+  toolsUsed?: string[];
+}
+
+/**
+ * Report one assistant event (a user prompt, or the agent's reply) to Pendo
+ * agent analytics. Guarded by type, like `clearSession`, because the loader
+ * stub may not have replaced `trackAgent` yet, and analytics must never break
+ * the chat.
+ */
+export function trackAssistantEvent(type: "prompt" | "agent_response", props: AgentEventProps): void {
+  if (typeof pendo?.trackAgent !== "function") return;
+  pendo.trackAgent(type, {
+    agentId: ASSISTANT_AGENT_ID,
+    suggestedPrompt: false,
+    fileUploaded: false,
+    toolsUsed: [],
+    ...props,
+  });
+}
