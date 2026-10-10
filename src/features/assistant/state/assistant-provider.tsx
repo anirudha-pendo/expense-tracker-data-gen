@@ -91,6 +91,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       composerDisabled: !online || snapshot.lock !== null,
       send: (text: string) => report(controller.send(text), "send"),
       stop: () => report(controller.stop(), "stop"),
+      newChat: () => report(controller.newChat(), "new chat"),
+      conversationId: snapshot.chat.id,
+      newChatStarted: snapshot.newChatStarted,
       // A failed category load is retried by loading again, not by re-sending the chat.
       retry: () => (snapshot.categoriesFailed ? loadCategories() : report(controller.retry(), "retry")),
       money: controller.money,

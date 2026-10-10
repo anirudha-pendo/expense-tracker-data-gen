@@ -7,8 +7,13 @@ import { useAssistant } from "../state/assistant-context";
 const IME_PROCESS_KEY = 229;
 
 export function Composer() {
-  const { send, stop, busy, ready, composerDisabled, composerRef } = useAssistant();
+  const { send, stop, busy, ready, composerDisabled, composerRef, conversationId } = useAssistant();
   const [text, setText] = useState("");
+  const [draftConversationId, setDraftConversationId] = useState(conversationId);
+  if (draftConversationId !== conversationId) {
+    setDraftConversationId(conversationId);
+    setText("");
+  }
   const trimmed = text.trim();
   const sendDisabled = composerDisabled || busy || !ready || trimmed.length === 0;
 

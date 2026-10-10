@@ -30,9 +30,14 @@ function EmptyState() {
 }
 
 export function MessageList() {
-  const { messages, busy, status, stoppedBeforeReply } = useAssistant();
+  const { messages, busy, status, stoppedBeforeReply, conversationId } = useAssistant();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
+  const [pinnedConversationId, setPinnedConversationId] = useState(conversationId);
+  if (pinnedConversationId !== conversationId) {
+    setPinnedConversationId(conversationId);
+    setPinned(true);
+  }
   const last = messages.at(-1);
   const thinking =
     status === "submitted" ||

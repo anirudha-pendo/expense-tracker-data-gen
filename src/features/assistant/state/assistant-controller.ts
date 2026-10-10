@@ -34,7 +34,13 @@ export interface ControllerSnapshot {
   proposals: ReadonlyMap<string, ProposalEntry>;
   resolving: ReadonlySet<string>;
   stoppedBeforeReply: ReadonlySet<string>;
+  newChatStarted: boolean;
 }
+
+type Conversation = Pick<
+  ControllerSnapshot,
+  "chat" | "stepLimitHit" | "stoppedTurn" | "pendingCalls" | "proposals" | "resolving" | "stoppedBeforeReply"
+>;
 
 export interface SessionInput {
   workspaceId: string | null;
@@ -71,19 +77,26 @@ export class AssistantController {
     for (const listener of this.listeners) listener();
   }
 
-  private freshSnapshot(sessionKey: string): ControllerSnapshot {
+  private freshConversation(): Conversation {
     return {
       chat: this.createChat(),
-      sessionKey,
-      lock: null,
       stepLimitHit: false,
       stoppedTurn: false,
       pendingCalls: 0,
-      categoriesLoaded: false,
-      categoriesFailed: false,
       proposals: new Map(),
       resolving: new Set(),
       stoppedBeforeReply: new Set(),
+    };
+  }
+
+  private freshSnapshot(sessionKey: string): ControllerSnapshot {
+    return {
+      ...this.freshConversation(),
+      sessionKey,
+      lock: null,
+      categoriesLoaded: false,
+      categoriesFailed: false,
+      newChatStarted: false,
     };
   }
 
@@ -118,8 +131,8 @@ export class AssistantController {
     return this.session.money;
   }
 
-  private shouldAutoSend(messages: AssistantUIMessage[]): boolean {
-    if (this.superseding || this.snapshot.stoppedTurn) return false;
+  private shouldAutoSend(chat: Chat<AssistantUIMessage>, messages: AssistantUIMessage[]): boolean {
+    if (chat !== this.snapshot.chat || this.superseding || this.snapshot.stoppedTurn) return false;
     if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) return false;
     const last = messages.at(-1);
     if (last !== undefined && !canAutoSendAgain(last.parts)) {
@@ -129,7 +142,7 @@ export class AssistantController {
     return true;
   }
 
-  // Bound to one chat so a tool finishing after a workspace switch cannot touch the new chat's state.
+  // Bound to one chat so a tool finishing after a new chat or workspace switch cannot touch the new chat's state.
   private toolDepsFor(chat: Chat<AssistantUIMessage>): ToolRunnerDeps {
     const adjust = (delta: number) => {
       if (this.snapshot.chat !== chat) return;
@@ -175,7 +188,7 @@ export class AssistantController {
       }),
       onError: (error) => this.reportError(error),
       onToolCall: ({ toolCall }) => handleAssistantToolCall(chat, toolCall, this.toolDepsFor(chat)),
-      sendAutomaticallyWhen: ({ messages }) => this.shouldAutoSend(messages),
+      sendAutomaticallyWhen: ({ messages }) => this.shouldAutoSend(chat, messages),
     });
     return chat;
   }
@@ -240,8 +253,20 @@ export class AssistantController {
 
   async send(text: string): Promise<void> {
     this.startTurn();
+    const chat = this.snapshot.chat;
     await this.supersedePending();
-    await this.snapshot.chat.sendMessage({ text });
+    if (chat !== this.snapshot.chat) return;
+    await chat.sendMessage({ text });
+  }
+
+  // Unconfirmed cards are dropped unwritten; tool results from the old chat land on that orphaned chat only.
+  async newChat(): Promise<void> {
+    const previous = this.snapshot.chat;
+    const stopping = previous.stop();
+    this.claimed.clear();
+    this.superseding = false;
+    this.update({ ...this.freshConversation(), newChatStarted: true });
+    await stopping;
   }
 
   async stop(): Promise<void> {

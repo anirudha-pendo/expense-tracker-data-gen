@@ -23,6 +23,9 @@ export interface AssistantContextValue {
   composerDisabled: boolean;
   send: (text: string) => void;
   stop: () => void;
+  newChat: () => void;
+  conversationId: string;
+  newChatStarted: boolean;
   retry: () => void;
   money: MoneyFormat;
   proposals: ReadonlyMap<string, ProposalEntry>;
