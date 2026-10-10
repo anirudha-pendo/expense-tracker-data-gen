@@ -443,16 +443,19 @@ already agree per account, and `bot/selftest.ts` enforces that agreement on
 | Composer | `getByLabel("Message")` textarea (Enter sends, Shift+Enter new line); buttons `Send` / `Stop` |
 | Alert | `getByRole("alert")` inside the panel, at most one; `Retry` button when retryable |
 | Jump button | `Jump to latest`, only after the user scrolled up |
-| Status region | sr-only `role="status"` (tool states, "Confirmation needed: …") |
+| Status region | sr-only `role="status"` (tool states, "Confirmation needed: …", "New chat started") |
+| New chat | `getByRole("button", { name: "New chat" })` in the header (ghost `+` icon, tooltip `New chat`); disabled while the conversation is empty |
 | Close | `Escape` or the `Close` (sr-only) X button |
 
-The conversation lives in memory only: it survives closing the panel and client-side route changes, and is gone after a reload, sign-out or workspace switch.
+The conversation lives in memory only: it survives closing the panel and client-side route changes, and is gone after New chat, a reload, sign-out or workspace switch.
+
+New chat stops any reply or tool round in flight (like `Stop`), drops unconfirmed cards with nothing written, and clears messages, tool rows, the alert, the draft and the `stopped` hint. No confirm dialog. Afterwards the empty state shows, the log is `aria-busy="false"` and focus is in the composer. The bot does not use it today: `askAssistant` counts messages relative to what is already in the log, so a carried-over conversation is fine.
 
 ### Done signal
 After sending, wait for the new `[data-message-role="user"]`, then for a new assistant message **or** an alert, then for `[role="log"][aria-busy="false"]`. A pending confirm card leaves `aria-busy="false"`.
 
 ### Soft states (copy is exact, from `src/features/assistant/contract/errors.ts`)
-Any alert means the assistant could not answer. `The assistant isn't set up yet.` and `The assistant has reached its usage limit. Try again later.` disable the composer for the session (the bot turns the assistant off for the whole run on these two). `The assistant is busy right now. Try again in a minute.` (provider rate limit/overload) and `The assistant could not answer. Try again.` are skips that turn the assistant off for that session only. `You're offline. Reconnect to use the assistant.` disables it until back online. Against `npm run dev` every send ends in `The assistant could not answer. Try again.` (no `/api`).
+Any alert means the assistant could not answer. `The assistant isn't set up yet.` and `The assistant has reached its usage limit. Try again later.` disable the composer for the session (the bot turns the assistant off for the whole run on these two). `The assistant is busy right now. Try again in a minute.` (provider rate limit/overload) and `The assistant could not answer. Try again.` are skips that turn the assistant off for that session only. `You're offline. Reconnect to use the assistant.` disables it until back online. `That conversation is too long to send. Start a new chat.` and `That message couldn't be sent. Start a new chat if this keeps happening.` (413/400) clear with New chat. Against `npm run dev` every send ends in `The assistant could not answer. Try again.` (no `/api`).
 
 ### Writes
 Confirm writes through the same repositories as the forms and emits `app:data-changed`; toasts `Added: {description}`, `Updated: {description}`, `Deleted: {description}`. A confirmed add or edit also runs the budget threshold toast, like the forms.
