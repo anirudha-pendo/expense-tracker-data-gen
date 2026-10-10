@@ -10,15 +10,18 @@ every app change breaks it silently** — the first sign is a failed CI run hour
 later, or a run that passes while quietly exercising less of the app than it
 used to.
 
-The one compile-time link is deliberate and narrow: `bot/selftest.ts` imports
-`../src/lib/analytics`, and `bot/tsconfig.json` maps `@/*` to `../src/*`, so the
-bot's TypeScript program includes `src/lib/analytics.ts`, `src/types/index.ts`
-and `src/global.d.ts`. An app type change can therefore fail `cd bot && npm run
-typecheck` — that is the intended early warning, not a surprise. It does not
-extend to runtime: apart from the pure `buildIdentifyOptions` the selftest
-calls, the import is type-only.
+The compile-time links are deliberate and narrow: `bot/selftest.ts` imports
+`../src/lib/analytics`, and `bot/actions.ts` imports
+`../src/features/assistant/contract/errors` for the assistant's exact alert
+copy. `bot/tsconfig.json` maps `@/*` to `../src/*`, so the bot's TypeScript
+program includes those files plus `src/types/index.ts` and `src/global.d.ts`. An
+app type change can therefore fail `cd bot && npm run typecheck` — that is the
+intended early warning, not a surprise. It does not extend to runtime: the
+selftest calls only the pure `buildIdentifyOptions` and the bot calls only
+`errorCopy`. `errors.ts` has zero imports and must keep it that way, because CI
+runs the bot with no root `node_modules`.
 
-Two things that link brings with it. App source is typechecked there under the
+Two things those links bring with them. App source is typechecked there under the
 bot's compiler options, which differ from `tsconfig.app.json` (no DOM lib, no
 `verbatimModuleSyntax`, no `noUnusedLocals`). And `Blob` — from `Attachment` in
 `src/types/index.ts` — resolves today only because `@types/node` declares it
