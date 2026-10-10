@@ -52,7 +52,7 @@ export function AssistantPanel() {
                   <Plus />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent className="font-mono text-[10px] tracking-widest uppercase motion-reduce:animate-none">
+              <TooltipContent className="font-mono text-[10px] tracking-widest uppercase motion-reduce:data-[state=delayed-open]:animate-none motion-reduce:data-closed:animate-none">
                 New chat
               </TooltipContent>
             </Tooltip>
