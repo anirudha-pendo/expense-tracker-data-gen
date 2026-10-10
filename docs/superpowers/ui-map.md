@@ -449,7 +449,10 @@ already agree per account, and `bot/selftest.ts` enforces that agreement on
 
 The conversation lives in memory only: it survives closing the panel and client-side route changes, and is gone after New chat, a reload, sign-out or workspace switch.
 
-New chat stops any reply or tool round in flight (like `Stop`), drops unconfirmed cards with nothing written, and clears messages, tool rows, the alert, the draft and the `stopped` hint. No confirm dialog. Afterwards the empty state shows, the log is `aria-busy="false"` and focus is in the composer. The bot does not use it today: `askAssistant` counts messages relative to what is already in the log, so a carried-over conversation is fine.
+New chat stops any reply in flight (like `Stop`), drops unconfirmed cards with nothing written, and clears messages, tool rows, the conversation's alert (request errors, step limit), the draft and the `stopped` hint. No confirm dialog. Afterwards the empty state shows and the log is `aria-busy="false"`. What it does not reset:
+- Session alerts stay: offline, `The assistant isn't set up yet.`, the usage-limit lock, and a failed category load.
+- A card whose `Confirm` was already clicked still finishes its write after the clear: the `Added/Updated/Deleted: …` toast shows and `app:data-changed` fires while the log is empty.
+- Focus goes to the composer only when it is enabled; when it is disabled (offline or locked) focus goes to the panel itself (`[data-slot="sheet-content"]`, the `Assistant` dialog), so it stays inside the panel. The bot does not use it today: `askAssistant` counts messages relative to what is already in the log, so a carried-over conversation is fine.
 
 ### Done signal
 After sending, wait for the new `[data-message-role="user"]`, then for a new assistant message **or** an alert, then for `[role="log"][aria-busy="false"]`. A pending confirm card leaves `aria-busy="false"`.
