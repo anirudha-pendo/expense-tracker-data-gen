@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -10,13 +11,15 @@ import { MessageList } from "./message-list";
 import { StatusAnnouncer } from "./status-announcer";
 
 export function AssistantPanel() {
-  const { open, setOpen, composerRef, messages, newChat } = useAssistant();
+  const { open, setOpen, composerRef, composerDisabled, messages, newChat } = useAssistant();
+  const contentRef = useRef<HTMLDivElement>(null);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <AssistantTrigger />
       </SheetTrigger>
       <SheetContent
+        ref={contentRef}
         side="right"
         className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md motion-reduce:data-open:animate-none motion-reduce:data-closed:animate-none"
         onOpenAutoFocus={(event) => {
@@ -42,7 +45,7 @@ export function AssistantPanel() {
                   disabled={messages.length === 0}
                   onClick={() => {
                     // Focus before the clear re-renders, so focus never falls to the body off a now-disabled button.
-                    composerRef.current?.focus();
+                    (composerDisabled ? contentRef.current : composerRef.current)?.focus();
                     newChat();
                   }}
                 >
