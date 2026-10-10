@@ -38,13 +38,13 @@ export const SERVER_ERRORS: Record<ServerErrorCode, ServerErrorSpec> = {
     http: 413,
     retryable: false,
     alert: "destructive",
-    copy: "That conversation is too long to send. Reload the page to start over.",
+    copy: "That conversation is too long to send. Start a new chat.",
   },
   bad_request: {
     http: 400,
     retryable: false,
     alert: "destructive",
-    copy: "That message couldn't be sent. Reload the page if this keeps happening.",
+    copy: "That message couldn't be sent. Start a new chat if this keeps happening.",
   },
   not_configured: {
     http: 503,
