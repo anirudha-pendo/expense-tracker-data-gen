@@ -107,6 +107,8 @@ what they affect.
 | `UI_RESET_MAX_ESCAPES` (5) | How many Escape presses the recovery code spends trying to close whatever a failed action left open. | 3–8. |
 | `FILTER_COUNT_MIN` / `FILTER_COUNT_MAX` (1–2) | How many of the four transaction filters one `filterTransactions` action touches at once. | 1–4 (4 is every filter at once). |
 | `FILTER_MONTH_LOOKBACK_MAX` (5) | The month filter picks a month up to this many months back. | 1–12. |
+| `ASSISTANT_PROMPTS_MIN` / `ASSISTANT_PROMPTS_MAX` (1–3) | Prompts one `askAssistant` action sends. | 1–5. |
+| `ASSISTANT_MAX_CARDS_PER_PROMPT` (3) | Confirm cards one prompt may resolve before the action fails as a runaway. | 2–5. |
 
 ### Timing and think pauses
 
@@ -129,6 +131,8 @@ what they affect.
 | `CONTRIBUTION_NOTE_RATE` (0.4) | A goal contribution gets an optional note. | 0–1. |
 | `WORKSPACE_CURRENCY_CHANGE_RATE` / `WORKSPACE_LOCALE_CHANGE_RATE` (0.25 each) | Updating workspace settings also changes the currency / number-format select. | 0–1. |
 | `QUICK_ADD_SHORTCUT_RATE` (0.5) | The quick-add palette is opened with Ctrl+K rather than the header button. | 0–1. |
+| `ASSISTANT_SHORTCUT_RATE` (0.3) | The assistant panel is opened with Ctrl+J rather than the header button. | 0–1. |
+| `ASSISTANT_CONFIRM_RATE` (0.75) | An assistant confirm card is confirmed rather than cancelled. | 0–1. |
 | `INSIGHTS_SCROLL_RATE` (0.7) | An insights dwell pause is preceded by a scroll. | 0–1. |
 | `NEW_VISITOR_SHOW_PASSWORD_RATE` (0.35) | A signing-up visitor clicks "Show password". | 0–1. |
 | `NEW_VISITOR_CURRENCY_CHANGE_RATE` / `NEW_VISITOR_LOCALE_CHANGE_RATE` (0.6 each) | Workspace setup changes the currency/locale away from its default. | 0–1. |
@@ -144,6 +148,7 @@ what they affect.
 | `DIALOG_TIMEOUT_MS` (15000) | How long a dialog gets to open, or to finish closing. | 5000–30000. |
 | `TOAST_TIMEOUT_MS` (15000) | How long a success toast gets to appear after a save. | 5000–30000. |
 | `QUICK_ADD_CHIPS_TIMEOUT_MS` (5000) | How long the quick-add palette gets to load its category chips. Shorter on purpose — a genuinely empty result should fail fast. | 2000–10000. |
+| `ASSISTANT_RESPONSE_TIMEOUT_MS` (60000) | How long one assistant reply, including its tool rounds, gets before `askAssistant` fails. | 30000–120000. |
 | `SCREENSHOT_TIMEOUT_MS` (15000) | How long a failure screenshot gets to be taken. Short on purpose — a hung page is usually *why* the session is failing. | 5000–20000. |
 
 There are a few more small pools not listed above (transaction backdating,

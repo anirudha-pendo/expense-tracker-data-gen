@@ -29,3 +29,6 @@ dist-ssr
 # Usage bot
 bot/node_modules
 bot/failures
+.vercel
+.env
+.env*.local

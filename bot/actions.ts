@@ -1,4 +1,4 @@
-// The bot's UI action library: 19 things a persona can do in the running
+// The bot's UI action library: 20 things a persona can do in the running
 // app, each one driving the real interface with real clicks so the analytics
 // agent on the page records genuine page views, feature clicks, funnels and
 // time-on-page. Nothing in here reaches into the app's state, its router or
@@ -65,12 +65,20 @@ import {
   INSIGHTS_SCROLL_PX_MAX,
   UI_RESET_MAX_ESCAPES,
   UI_RESET_SETTLE_MS,
+  ASSISTANT_SHORTCUT_RATE,
+  ASSISTANT_PROMPTS_MIN,
+  ASSISTANT_PROMPTS_MAX,
+  ASSISTANT_RESPONSE_TIMEOUT_MS,
+  ASSISTANT_CONFIRM_RATE,
+  ASSISTANT_MAX_CARDS_PER_PROMPT,
   makeRng,
   type Rng,
 } from "./config";
+import { errorCopy } from "../src/features/assistant/contract/errors";
 import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
+  ASSISTANT_PROMPT_TEMPLATES,
   CUSTOM_CATEGORY_SEEDS,
   DEFAULT_CATEGORY_SEEDS,
   EXPENSE_TRANSACTION_RATE,
@@ -80,6 +88,7 @@ import {
   GOAL_SEED_POOL,
   SWATCH_PRESET_COLORS,
   WORKSPACE_NAME_TEMPLATES,
+  type AssistantPromptIntent,
   type CategorySeed,
 } from "./seed-data";
 
@@ -94,6 +103,10 @@ export interface SessionCtx {
   /** Probability, per multi-step action, that the persona bails out mid-flow. Comes from the persona's archetype. */
   abandonRate: number;
   log: (msg: string) => void;
+  /** Set once a panel alert appears; the assistant is not used again this session. */
+  assistantOff: boolean;
+  /** The categories this session's workspace was seeded with; prompts name these. */
+  categorySeeds: readonly CategorySeed[];
 }
 
 export interface Action {
@@ -140,11 +153,13 @@ export async function preparePage(page: Page): Promise<void> {
 
 /**
  * Every layer this app can leave floating over the page: the two radix
- * dialog kinds, a select's portaled listbox, and a dropdown menu.
+ * dialog kinds, the assistant sheet, a select's portaled listbox, and a
+ * dropdown menu.
  */
 const OVERLAY_SELECTOR = [
   '[data-slot="dialog-content"]',
   '[data-slot="alert-dialog-content"]',
+  '[data-slot="sheet-content"]',
   '[role="listbox"]',
   '[role="menu"]',
 ].join(", ");
@@ -1153,6 +1168,102 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
   await think(page, ctx);
 }
 
+// --- Assistant ------------------------------------------------------------------
+
+// not_configured and an exhausted spend limit will not clear within a run, so stop knocking.
+let assistantOffForRun = false;
+const RUN_ENDING_ALERTS = [errorCopy("not_configured"), errorCopy("provider_quota_exhausted")];
+
+function buildAssistantPrompt(
+  rng: Rng,
+  categories: readonly CategorySeed[],
+): { intent: AssistantPromptIntent; text: string } {
+  const template = rng.weighted(ASSISTANT_PROMPT_TEMPLATES, (t) => t.weight);
+  const expense = categories.filter((c) => c.scope === "expense");
+  const seed = rng.pick(expense.length > 0 ? [...expense] : [...categories]);
+  const text = template.text
+    .replaceAll("{category}", seed.name)
+    .replaceAll("{description}", rng.pick(seed.descriptions).toLowerCase())
+    .replaceAll("{amount}", String(rng.int(seed.amountMin, seed.amountMax)));
+  return { intent: template.intent, text };
+}
+
+function assistantPanel(page: Page): Locator {
+  return page.getByRole("dialog", { name: "Assistant" });
+}
+
+type PromptOutcome = "answered" | "unavailable";
+
+async function waitForFewerConfirms(page: Page, confirms: Locator, before: number): Promise<void> {
+  const deadline = Date.now() + DIALOG_TIMEOUT_MS;
+  while ((await confirms.count()) >= before) {
+    if (Date.now() > deadline) throw new Error("a resolved assistant card kept its Confirm button");
+    await page.waitForTimeout(100);
+  }
+}
+
+/** Waits for the turn to finish, resolving any confirm cards the reply proposes. */
+async function settleAssistantReply(page: Page, ctx: SessionCtx, panel: Locator): Promise<PromptOutcome> {
+  const log = panel.getByRole("log", { name: "Conversation" });
+  const alert = panel.getByRole("alert");
+  for (let card = 0; card <= ASSISTANT_MAX_CARDS_PER_PROMPT; card++) {
+    await panel.locator('[role="log"][aria-busy="false"]').waitFor({ timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
+    if (await alert.isVisible()) {
+      // First line only: the alert also holds the Retry button's label.
+      const text = (await alert.innerText()).trim().split("\n")[0];
+      if (RUN_ENDING_ALERTS.some((copy) => text.includes(copy))) assistantOffForRun = true;
+      ctx.assistantOff = true;
+      ctx.log(`skipped:askAssistant (assistant unavailable: ${text})`);
+      return "unavailable";
+    }
+    const confirms = log.getByRole("button", { name: "Confirm", exact: true });
+    const open = await confirms.count();
+    if (open === 0) return "answered";
+    const choice = ctx.rng.chance(ASSISTANT_CONFIRM_RATE) ? "Confirm" : "Cancel";
+    await log.getByRole("button", { name: choice, exact: true }).first().click();
+    await waitForFewerConfirms(page, confirms, open);
+    ctx.log(`askAssistant: ${choice === "Confirm" ? "confirmed" : "cancelled"} a card`);
+  }
+  throw new Error(`the assistant proposed more than ${ASSISTANT_MAX_CARDS_PER_PROMPT} confirm cards for one prompt`);
+}
+
+async function runAskAssistant(page: Page, ctx: SessionCtx): Promise<void> {
+  await ensureAppRoute(page, ctx);
+  if (ctx.rng.chance(ASSISTANT_SHORTCUT_RATE)) await page.keyboard.press("Control+j");
+  else await page.getByRole("button", { name: "Open assistant", exact: true }).click();
+  const panel = assistantPanel(page);
+  await panel.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  const log = panel.getByRole("log", { name: "Conversation" });
+  const input = panel.getByLabel("Message", { exact: true });
+
+  const prompts = ctx.rng.int(ASSISTANT_PROMPTS_MIN, ASSISTANT_PROMPTS_MAX);
+  for (let i = 0; i < prompts; i++) {
+    const { intent, text } = buildAssistantPrompt(ctx.rng, ctx.categorySeeds);
+    const users = log.locator('[data-message-role="user"]');
+    const sentBefore = await users.count();
+    const repliesBefore = await log.locator('[data-message-role="assistant"]').count();
+    await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+    await input.fill(text);
+    await input.press("Enter");
+    await users.nth(sentBefore).waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+    await log
+      .locator('[data-message-role="assistant"]')
+      .nth(repliesBefore)
+      .or(panel.getByRole("alert"))
+      .first()
+      .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
+    ctx.log(`askAssistant: sent a ${intent} prompt`);
+    if ((await settleAssistantReply(page, ctx, panel)) === "unavailable") break;
+    await think(page, ctx);
+  }
+
+  const rows = (await log.locator("[data-tool]").allInnerTexts()).map((r) => r.trim());
+  ctx.log(`askAssistant: tool rows [${rows.join(" | ")}]`);
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });
+  await think(page, ctx);
+}
+
 // --- Reading and leaving ------------------------------------------------------
 
 /**
@@ -1201,7 +1312,7 @@ function archetypeWeight(name: ActionName): (ctx: SessionCtx) => number {
 }
 
 /**
- * Keying by `ActionName` makes the compiler check that all 19 exist, that
+ * Keying by `ActionName` makes the compiler check that all 20 exist, that
  * none is misspelled, and — because each value's `name` is narrowed to its
  * own key — that no entry is filed under the wrong name.
  */
@@ -1298,6 +1409,11 @@ const ACTION_MAP: ActionMap = {
     weight: archetypeWeight("readInsights"),
     run: runReadInsights,
   },
+  askAssistant: {
+    name: "askAssistant",
+    weight: (ctx) => (assistantOffForRun || ctx.assistantOff ? 0 : archetypeWeight("askAssistant")(ctx)),
+    run: runAskAssistant,
+  },
   signOut: {
     name: "signOut",
     weight: archetypeWeight("signOut"),
@@ -1305,5 +1421,5 @@ const ACTION_MAP: ActionMap = {
   },
 };
 
-/** All 19 actions. Order is the declaration order above, which is the order the brief lists them in. */
+/** All 20 actions. Order is the declaration order above, which is the order the brief lists them in. */
 export const ACTIONS: Action[] = Object.values(ACTION_MAP);

@@ -3,7 +3,8 @@ import { getTransactionsByWorkspaceId } from "@/lib/db/repositories/transactions
 import { getCategoriesByWorkspaceId } from "@/lib/db/repositories/categories.repo";
 import { useDataChanged } from "@/shared/lib/data-events";
 import type { Category, Transaction } from "@/types";
-import { startOfMonth, endOfMonth, subMonths, format } from "date-fns";
+import { subMonths, format } from "date-fns";
+import { isInMonth } from "@/lib/dates";
 
 export interface SummaryStats {
   totalIncome: number;
@@ -59,13 +60,7 @@ export function useDashboardStats(workspaceId: string): DashboardStats {
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
 
   const now = new Date();
-  const monthStart = startOfMonth(now);
-  const monthEnd = endOfMonth(now);
-
-  const thisMonthTxs = transactions.filter((t) => {
-    const d = new Date(t.date);
-    return d >= monthStart && d <= monthEnd;
-  });
+  const thisMonthTxs = transactions.filter((t) => isInMonth(t.date, now));
 
   const totalIncome = thisMonthTxs
     .filter((t) => t.type === "income")
@@ -92,12 +87,7 @@ export function useDashboardStats(workspaceId: string): DashboardStats {
 
   const monthlyTrend: MonthlyTrend[] = Array.from({ length: 6 }, (_, i) => {
     const date = subMonths(now, 5 - i);
-    const start = startOfMonth(date);
-    const end = endOfMonth(date);
-    const monthTxs = transactions.filter((t) => {
-      const d = new Date(t.date);
-      return d >= start && d <= end;
-    });
+    const monthTxs = transactions.filter((t) => isInMonth(t.date, date));
     return {
       month: format(date, "MMM"),
       income: monthTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0),

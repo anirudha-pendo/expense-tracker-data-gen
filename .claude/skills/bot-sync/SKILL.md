@@ -11,15 +11,18 @@ change breaks it silently — the first symptom is a failed run in CI hours
 later, or worse, a run that passes while quietly exercising less than it used
 to.
 
-There is exactly one compile-time link, and it is deliberate: `bot/selftest.ts`
-imports `../src/lib/analytics`, and `bot/tsconfig.json` maps `@/*` to
-`../src/*`, so the bot's TypeScript program includes `src/lib/analytics.ts`,
-`src/types/index.ts` and `src/global.d.ts`. An app type change can therefore
-fail `cd bot && npm run typecheck` — that is the intended early warning, not a
-surprise. It does not extend to runtime: apart from the pure
-`buildIdentifyOptions` the selftest calls, the import is type-only.
+There are two compile-time links, and both are deliberate: `bot/selftest.ts`
+imports `../src/lib/analytics`, and `bot/actions.ts` imports
+`../src/features/assistant/contract/errors` for the assistant's exact alert
+copy. `bot/tsconfig.json` maps `@/*` to `../src/*`, so the bot's TypeScript
+program includes those files plus `src/types/index.ts` and `src/global.d.ts`. An
+app type change can therefore fail `cd bot && npm run typecheck` — that is the
+intended early warning, not a surprise. It does not extend to runtime: the
+selftest calls only the pure `buildIdentifyOptions` and the bot calls only
+`errorCopy`. `errors.ts` has zero imports and must keep it that way, because CI
+runs the bot with no root `node_modules`.
 
-Three consequences of that link. App source is typechecked under the bot's
+Three consequences of those links. App source is typechecked under the bot's
 compiler options, which differ from `tsconfig.app.json` (no DOM lib, no
 `verbatimModuleSyntax`, no `noUnusedLocals`). `Blob` — from `Attachment` in
 `src/types/index.ts` — resolves today only because `@types/node` declares it
@@ -155,6 +158,24 @@ set `NEW_VISITOR_RATE = 1` in `bot/config.ts`, run, then put it back and confirm
 own sign-up change was verified.
 
 Stop the dev server afterwards.
+
+The assistant (`askAssistant`) needs `/api/chat`, which Vite does not serve.
+Against `npm run dev` every `askAssistant` ends as `skipped:askAssistant
+(assistant unavailable: …)` — that proves the skip path only. To verify the real
+chat, run the app with `vercel dev` as `docs/superpowers/ui-map.md` §1 describes
+(an empty `{}` config file kept outside the repo, passed with `-A`, and
+`ANTHROPIC_API_KEY` exported in that shell — never print, log or commit it),
+then point the bot at it:
+
+```bash
+vercel dev -A /path/outside/repo/vercel.empty.json --listen 3000 &
+until curl -sf http://localhost:3000 > /dev/null; do sleep 1; done
+cd bot && APP_URL=http://localhost:3000 BOT_SESSIONS=4 HEADLESS=true npm run run
+```
+
+Proof for the assistant: the log shows `askAssistant: tool rows [...]` with at
+least one row, and no `failed:askAssistant`. If you bump a weight to make
+`askAssistant` run, put it back before you finish (`git diff bot/` clean).
 
 ## Step 7 — Report
 

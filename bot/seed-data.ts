@@ -487,6 +487,39 @@ export const REGION_WORKSPACE_OPTIONS: Record<Region, RegionWorkspaceOption[]> =
 export const WORKSPACE_CREATED_BUFFER_DAYS_MIN = 1;
 export const WORKSPACE_CREATED_BUFFER_DAYS_MAX = 14;
 
+// --- Assistant prompt bank ---------------------------------------------------
+// {category}, {description} and {amount} are filled from one of the session's expense category seeds.
+
+export type AssistantPromptIntent =
+  | "getSpendingSummary"
+  | "findTransactions"
+  | "addTransaction"
+  | "updateTransaction"
+  | "deleteTransaction"
+  | "clarify"
+  | "outOfScope";
+
+export interface AssistantPromptTemplate {
+  intent: AssistantPromptIntent;
+  weight: number;
+  text: string;
+}
+
+export const ASSISTANT_PROMPT_TEMPLATES: AssistantPromptTemplate[] = [
+  { intent: "getSpendingSummary", weight: 6, text: "Where did my money go this month?" },
+  { intent: "getSpendingSummary", weight: 5, text: "How much did I spend on {category} this month?" },
+  { intent: "getSpendingSummary", weight: 3, text: "How much did I spend on {category} since the 1st of last month?" },
+  { intent: "getSpendingSummary", weight: 2, text: "How much did I earn this month?" },
+  { intent: "findTransactions", weight: 4, text: "Show my last 5 {category} transactions" },
+  { intent: "findTransactions", weight: 3, text: "Find my biggest expenses this month" },
+  { intent: "addTransaction", weight: 5, text: "Spent {amount} on {description} today" },
+  { intent: "addTransaction", weight: 3, text: "Add {amount} for {description} in {category} yesterday" },
+  { intent: "updateTransaction", weight: 2, text: "Change my most recent {category} expense to {amount}" },
+  { intent: "deleteTransaction", weight: 1, text: "Delete my most recent {category} transaction" },
+  { intent: "clarify", weight: 1, text: "Add an expense for {description}" },
+  { intent: "outOfScope", weight: 1, text: "What's the weather like today?" },
+];
+
 // --- New visitors -------------------------------------------------------------
 //
 // Content for the sign-up sessions the run orchestrator drives through the

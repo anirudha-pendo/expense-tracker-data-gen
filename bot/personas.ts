@@ -143,7 +143,7 @@ export interface Budget {
 export type Archetype = "power" | "regular" | "casual" | "explorer" | "churning";
 
 /**
- * The 19 UI actions Task 4 implements. Keeping this a string-literal union
+ * The 20 UI actions the bot implements. Keeping this a string-literal union
  * (rather than plain `string`) means a typo in an archetype's weights is a
  * compile error instead of an action silently getting weight 0 and never
  * being exercised.
@@ -167,10 +167,11 @@ export type ActionName =
   | "addCategory"
   | "useQuickAdd"
   | "readInsights"
+  | "askAssistant"
   | "signOut";
 
 /**
- * Per-archetype relative weights for each of the 19 actions, keyed by
+ * Per-archetype relative weights for each of the 20 actions, keyed by
  * archetype so `ARCHETYPES[x].actionWeights` and this table always agree.
  * Behavioural axes (per the brief):
  *  - power: favours adding transactions, insights, budgets and goals.
@@ -201,6 +202,7 @@ export const ACTION_WEIGHTS: Record<Archetype, Record<ActionName, number>> = {
     addCategory: 2,
     useQuickAdd: 8,
     readInsights: 10,
+    askAssistant: 6,
     signOut: 3,
   },
   regular: {
@@ -222,6 +224,7 @@ export const ACTION_WEIGHTS: Record<Archetype, Record<ActionName, number>> = {
     addCategory: 1,
     useQuickAdd: 5,
     readInsights: 5,
+    askAssistant: 5,
     signOut: 3,
   },
   casual: {
@@ -243,6 +246,7 @@ export const ACTION_WEIGHTS: Record<Archetype, Record<ActionName, number>> = {
     addCategory: 1,
     useQuickAdd: 3,
     readInsights: 2,
+    askAssistant: 2,
     signOut: 3,
   },
   explorer: {
@@ -264,6 +268,7 @@ export const ACTION_WEIGHTS: Record<Archetype, Record<ActionName, number>> = {
     addCategory: 5,
     useQuickAdd: 4,
     readInsights: 6,
+    askAssistant: 4,
     signOut: 3,
   },
   churning: {
@@ -285,6 +290,7 @@ export const ACTION_WEIGHTS: Record<Archetype, Record<ActionName, number>> = {
     addCategory: 0,
     useQuickAdd: 1,
     readInsights: 1,
+    askAssistant: 1,
     signOut: 5,
   },
 };
@@ -836,6 +842,12 @@ function accountEarliestDate(persona: Persona, now: Date): Date {
     earliestYm = Math.min(earliestYm, earliestYmOf(member.archetype));
   }
   return dateFromYm(earliestYm, 1, 0, 0);
+}
+
+/** The category seeds behind a returning persona's workspace, so generated text can name the persona's own categories. */
+export function personaCategorySeeds(persona: Persona): CategorySeed[] {
+  const names = new Set(buildSeedData(persona, new Date()).categories.map((category) => category.name));
+  return [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS].filter((seed) => names.has(seed.name));
 }
 
 /**
