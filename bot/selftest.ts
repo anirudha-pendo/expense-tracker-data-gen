@@ -26,7 +26,24 @@ import {
 } from "./personas";
 import { planWorkspaceRename } from "./actions";
 import { buildIdentifyOptions } from "../src/lib/analytics";
-import { INTENTS, INTENT_EXPECT, SHAPES, verdict, type Expect, type Verdict } from "./assistant-prompts";
+import {
+  CELLS,
+  FOLLOWUP_KINDS,
+  FOLLOWUP_TEMPLATES,
+  INTENTS,
+  INTENT_EXPECT,
+  IN_SCOPE_INTENTS,
+  OPENER_TEMPLATES,
+  SHAPES,
+  renderTemplate,
+  templateSlots,
+  verdict,
+  type Expect,
+  type Register,
+  type SlotName,
+  type Template,
+  type Verdict,
+} from "./assistant-prompts";
 
 let checksPassed = 0;
 
@@ -458,6 +475,91 @@ check("verdict: match, miss, overreach beats miss, unavailable, any-of must, for
   for (const [expect, tools, unavailable, wanted] of cases) {
     assert.strictEqual(verdict(expect, tools, unavailable), wanted, `${JSON.stringify(expect)} + [${tools}] unavailable=${unavailable}`);
   }
+});
+
+const STYLE_REGISTERS: readonly Register[] = ["terse", "plain", "chatty"];
+
+/** Which slots each cell's templates must and may use, so a template cannot quietly ask the wrong question. */
+const CELL_SLOTS: Record<string, { required: SlotName[]; optional: SlotName[] }> = {
+  "spendSummary/all": { required: [], optional: ["period"] },
+  "spendSummary/category": { required: ["category"], optional: ["period"] },
+  "incomeSummary/all": { required: [], optional: ["period"] },
+  "incomeSummary/category": { required: ["category"], optional: ["period"] },
+  "findTransactions/category": { required: ["category"], optional: ["period"] },
+  "findTransactions/text": { required: ["text"], optional: ["period"] },
+  "findTransactions/amountRange": { required: ["category", "range"], optional: ["period"] },
+  "topTransactions/all": { required: ["order"], optional: ["limit", "period"] },
+  "topTransactions/category": { required: ["order", "category"], optional: ["limit", "period"] },
+  "addTransaction/full": { required: ["amount", "description", "category"], optional: [] },
+  "addTransaction/inferCategory": { required: ["amount", "description"], optional: [] },
+  "addTransaction/pastDate": { required: ["amount", "description", "date"], optional: ["category"] },
+  "editTransaction/amount": { required: ["target", "newAmount"], optional: [] },
+  "editTransaction/category": { required: ["target", "newCategory"], optional: [] },
+  "editTransaction/date": { required: ["target", "newDate"], optional: [] },
+  "deleteTransaction/target": { required: ["target"], optional: [] },
+  "vague/none": { required: [], optional: ["period"] },
+  "clarify/missingAmount": { required: ["description"], optional: [] },
+  "clarify/missingWhat": { required: ["amount"], optional: [] },
+  "clarify/ambiguousTarget": { required: ["ambiguous"], optional: [] },
+};
+
+check("the bank has the 28 cells in intent x shape order", () => {
+  const keys = CELLS.map((cell) => `${cell.intent}/${cell.shape}`);
+  const expected = INTENTS.flatMap((intent) => SHAPES[intent].map((shape) => `${intent}/${shape}`));
+  assert.deepStrictEqual(keys, expected);
+});
+
+check("every template parses: known slots, flat [a|b], no slot glued to a letter, no quote, bracket or newline", () => {
+  for (const text of [...OPENER_TEMPLATES, ...FOLLOWUP_TEMPLATES].map((t) => t.text)) {
+    assert.doesNotThrow(() => templateSlots(text), text);
+    const stripped = text.replace(/\[[^[\]{}|]*(\|[^[\]{}|]*)+\]/g, "").replace(/\{[A-Za-z]+\}/g, "");
+    assert.ok(!/[[\]{}|]/.test(stripped), `unbalanced, nested or single-option brackets in "${text}"`);
+    assert.ok(!/[A-Za-z]\{|\}[A-Za-z]/.test(text), `a slot touches a letter in "${text}"`);
+    assert.ok(!/["\n\r]/.test(text), `quote or newline in "${text}"`);
+  }
+});
+
+check("every opener template uses exactly its cell's required slots plus allowed optional ones", () => {
+  for (const t of OPENER_TEMPLATES) {
+    const rule = CELL_SLOTS[`${t.intent}/${t.shape}`] ?? { required: [], optional: [] };
+    for (const slot of rule.required) assert.ok(t.slots.includes(slot), `"${t.text}" is missing {${slot}}`);
+    for (const slot of t.slots) assert.ok([...rule.required, ...rule.optional].includes(slot), `"${t.text}" may not use {${slot}}`);
+  }
+});
+
+check("bank sizes meet the spec minimums (AC2)", () => {
+  const count = (pred: (t: Template) => boolean): number => OPENER_TEMPLATES.filter(pred).length;
+  for (const intent of IN_SCOPE_INTENTS) {
+    assert.ok(count((t) => t.intent === intent) >= 12, `${intent} has fewer than 12 templates`);
+    for (const register of STYLE_REGISTERS) {
+      assert.ok(count((t) => t.intent === intent && t.register === register) >= 4, `${intent} has fewer than 4 ${register} templates`);
+    }
+  }
+  for (const cell of CELLS) {
+    const n = count((t) => t.intent === cell.intent && t.shape === cell.shape);
+    const min = IN_SCOPE_INTENTS.includes(cell.intent) ? 2 : 4;
+    assert.ok(n >= min, `${cell.intent}/${cell.shape} has ${n} templates, needs ${min}`);
+  }
+  assert.ok(count((t) => t.intent === "vague") >= 15, "vague needs 15");
+  assert.ok(count((t) => t.intent === "adviceRefusal") >= 12, "adviceRefusal needs 12");
+  assert.ok(count((t) => t.intent === "offTopic") >= 30, "offTopic needs 30");
+  for (const kind of FOLLOWUP_KINDS) {
+    assert.ok(FOLLOWUP_TEMPLATES.filter((t) => t.kind === kind).length >= 6, `follow-up ${kind} needs 6`);
+  }
+  assert.ok(OPENER_TEMPLATES.length + FOLLOWUP_TEMPLATES.length >= 250, "the bank needs 250 templates in total");
+});
+
+check("renderTemplate resolves [a|b], keeps slot values in their own parts, and refuses a missing value", () => {
+  const seen = new Set<string>();
+  for (let i = 0; i < 50; i++) {
+    const parts = renderTemplate("I [spent a lot|went overboard] on {category}?", { category: "Food & Dining" }, makeRng(`render:${i}`));
+    seen.add(parts.map((part) => part.text).join(""));
+    assert.deepStrictEqual(parts.filter((part) => part.slot), [{ text: "Food & Dining", slot: true }]);
+  }
+  assert.deepStrictEqual([...seen].sort(), ["I spent a lot on Food & Dining?", "I went overboard on Food & Dining?"]);
+  assert.deepStrictEqual(renderTemplate("{amount}", { amount: "4.50" }, makeRng("render")), [{ text: "4.50", slot: true }]);
+  assert.throws(() => renderTemplate("add {amount}", {}, makeRng("render")), /needs a value for \{amount\}/);
+  assert.throws(() => templateSlots("add {money}"), /unknown slot \{money\}/);
 });
 
 // --- Summary -----------------------------------------------------------------
