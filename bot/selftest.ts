@@ -30,7 +30,7 @@ import {
   type SeedData,
 } from "./personas";
 import { planWorkspaceRename } from "./actions";
-import { formatAssistantBlock } from "./run";
+import { comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
   ARCHETYPE_STYLE,
@@ -1135,6 +1135,47 @@ check("the run summary's assistant block totals every session and never prints N
   assert.match(table[2], /^spendSummary\s+2\s+1\s+1\s+0\s+0$/);
   assert.match(table[3], /^addTransaction\s+1\s+0\s+0\s+0\s+1$/);
   assert.match(table[4], /^offTopic\s+1\s+1\s+0\s+0\s+0$/);
+});
+
+check("only Pendo event beacons are counted (RF5)", () => {
+  const key = "5b81f2bb-e7bb-4070-8618-ac0dc1d8c185";
+  const cases: [string, boolean][] = [
+    [`https://data.pendo-dev.pendo-dev.com/data/ptm.gif/${key}?v=2.346.0&ct=1`, true],
+    [`https://app.pendo.io/data/ptm.gif/${key}`, true],
+    [`https://data.pendo-dev.pendo-dev.com/data/guide.json/${key}`, false],
+    [`https://data.pendo-dev.pendo-dev.com/data/recordingconf/${key}`, false],
+    [`https://data.pendo-dev.pendo-dev.com/data/rec/${key}`, false],
+    [`https://cdn.pendo-dev.pendo-dev.com/agent/static/${key}/pendo.js`, false],
+    [`https://expense-tracker-data-gen.vercel.app/data/ptm.gif/${key}`, false],
+    ["https://expense-tracker-data-gen.vercel.app/api/chat", false],
+    ["data:image/gif;base64,R0lGOD", false],
+  ];
+  for (const [url, wanted] of cases) assert.strictEqual(isPendoBeacon(url), wanted, url);
+});
+
+check("Pendo ids: returning sessions must match the seed, new visitors only need ids (RF5)", () => {
+  const seeded = { visitorId: "user-1", accountId: "ws-1" };
+  assert.deepStrictEqual(comparePendoIds(seeded, seeded), { visitor: "match", account: "match" });
+  assert.deepStrictEqual(comparePendoIds({ visitorId: "user-1", accountId: "ws-2" }, seeded), { visitor: "match", account: "mismatch" });
+  assert.deepStrictEqual(comparePendoIds({ visitorId: "", accountId: "" }, seeded), { visitor: "mismatch", account: "mismatch" });
+  assert.deepStrictEqual(comparePendoIds({ visitorId: "fresh-user", accountId: "fresh-ws" }, null), { visitor: "match", account: "match" });
+  assert.deepStrictEqual(comparePendoIds({ visitorId: "fresh-user", accountId: "" }, null), { visitor: "match", account: "mismatch" });
+  assert.strictEqual(formatPendoReading({ status: "ready", visitor: "match", account: "mismatch" }), "pendo: ready visitor=match account=mismatch");
+  assert.strictEqual(formatPendoReading({ status: "not-ready" }), "pendo: not ready after 15000ms (data-quality warning)");
+  assert.strictEqual(formatBeaconLine(12, 5), "pendo: 12 beacons");
+  assert.strictEqual(formatBeaconLine(0, 0), "pendo: 0 beacons");
+  assert.strictEqual(formatBeaconLine(0, 3), "pendo: 0 beacons (data-quality warning: 3 action(s) ran)");
+});
+
+check("the run summary's pendo block counts ready sessions, mismatches, beacons and silent sessions", () => {
+  assert.deepStrictEqual(formatPendoBlock([]), ["", "pendo ready       0/0 session(s), 0 with an id mismatch", "pendo beacons     0 total, 0 session(s) with none"]);
+  const lines = formatPendoBlock([
+    { reading: { status: "ready", visitor: "match", account: "match" }, beacons: 20 },
+    { reading: { status: "ready", visitor: "match", account: "mismatch" }, beacons: 4 },
+    { reading: { status: "not-ready" }, beacons: 0 },
+    { reading: { status: "unchecked" }, beacons: 0 },
+  ]);
+  assert.deepStrictEqual(lines, ["", "pendo ready       2/4 session(s), 1 with an id mismatch", "pendo beacons     24 total, 2 session(s) with none"]);
 });
 
 // --- Summary -----------------------------------------------------------------

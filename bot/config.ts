@@ -456,6 +456,9 @@ export const USER_AGENTS: string[] = [
  */
 export const SCREENSHOT_TIMEOUT_MS = 15000;
 
+/** How long the session's one Pendo check waits for the agent to report ready. */
+export const PENDO_READY_TIMEOUT_MS = 15000;
+
 // --- New-visitor sessions ---------------------------------------------------
 //
 // A NEW_VISITOR_RATE share of every run's slots signs up through the real UI
