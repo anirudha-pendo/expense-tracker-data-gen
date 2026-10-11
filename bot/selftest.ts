@@ -26,6 +26,7 @@ import {
 } from "./personas";
 import { planWorkspaceRename } from "./actions";
 import { buildIdentifyOptions } from "../src/lib/analytics";
+import { INTENTS, INTENT_EXPECT, SHAPES, verdict, type Expect, type Verdict } from "./assistant-prompts";
 
 let checksPassed = 0;
 
@@ -427,6 +428,36 @@ check("buildIdentifyOptions omits the email key for a user that has none", () =>
     !("email" in options.visitor),
     "an absent email must not become `email: undefined` — Pendo would store the key and the visitor would read as having a blank email",
   );
+});
+
+// --- Assistant prompts ---------------------------------------------------------
+
+check("13 intents with 28 intent x shape cells", () => {
+  assert.strictEqual(INTENTS.length, 13);
+  assert.strictEqual(INTENTS.reduce((sum, intent) => sum + SHAPES[intent].length, 0), 28);
+});
+
+check("verdict: match, miss, overreach beats miss, unavailable, any-of must, forbid all (AC13)", () => {
+  const anyOf: Expect = { must: ["addTransaction", "updateTransaction"], forbid: [] };
+  const cases: [Expect, string[], boolean, Verdict][] = [
+    [INTENT_EXPECT.spendSummary, ["getSpendingSummary"], false, "match"],
+    [INTENT_EXPECT.spendSummary, [], false, "miss"],
+    [INTENT_EXPECT.spendSummary, ["findTransactions"], false, "miss"],
+    [INTENT_EXPECT.findTransactions, ["deleteTransaction"], false, "overreach"],
+    [INTENT_EXPECT.spendSummary, ["getSpendingSummary"], true, "unavailable"],
+    [INTENT_EXPECT.spendSummary, ["addTransaction"], true, "unavailable"],
+    [anyOf, ["updateTransaction"], false, "match"],
+    [anyOf, ["addTransaction", "findTransactions"], false, "match"],
+    [anyOf, ["findTransactions"], false, "miss"],
+    [INTENT_EXPECT.offTopic, [], false, "match"],
+    [INTENT_EXPECT.offTopic, ["getSpendingSummary"], false, "overreach"],
+    [INTENT_EXPECT.vague, ["getSpendingSummary"], false, "match"],
+    [INTENT_EXPECT.vague, ["addTransaction"], false, "overreach"],
+    [INTENT_EXPECT.deleteTransaction, ["deleteTransaction"], false, "match"],
+  ];
+  for (const [expect, tools, unavailable, wanted] of cases) {
+    assert.strictEqual(verdict(expect, tools, unavailable), wanted, `${JSON.stringify(expect)} + [${tools}] unavailable=${unavailable}`);
+  }
 });
 
 // --- Summary -----------------------------------------------------------------
