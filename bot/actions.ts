@@ -74,7 +74,7 @@ import {
   type Rng,
 } from "./config";
 import { errorCopy } from "../src/features/assistant/contract/errors";
-import { formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn } from "./assistant-prompts";
+import { formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn, type TurnRecord } from "./assistant-prompts";
 import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
@@ -105,6 +105,14 @@ export interface SessionCtx {
   assistantOff: boolean;
   /** This session's prompt plan, on its own RNG stream so model replies never shift it. */
   assistant: AssistantPlanner;
+  assistantLog: AssistantSessionLog;
+}
+
+/** What this session's assistant turns did, for the run summary. */
+export interface AssistantSessionLog {
+  turns: TurnRecord[];
+  /** askAssistant actions cut short by the run turn cap. */
+  capSkips: number;
 }
 
 export interface Action {
@@ -1256,7 +1264,9 @@ async function askTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn, 
     .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
   const outcome = await settleAssistantReply(page, ctx, panel);
   const tools = await toolNames(toolRows, toolsBefore);
-  ctx.log(formatTurnLine(index, total, turn, tools, verdict(turn.expect, tools, outcome === "unavailable")));
+  const result = verdict(turn.expect, tools, outcome === "unavailable");
+  ctx.log(formatTurnLine(index, total, turn, tools, result));
+  ctx.assistantLog.turns.push({ intent: turn.intent, scopeLabel: turn.scopeLabel, verdict: result });
   return outcome;
 }
 
@@ -1278,6 +1288,7 @@ async function askThreads(page: Page, ctx: SessionCtx, panel: Locator, threads: 
     if (thread.newChat && (await messages.count()) > 0) await startNewChat(panel, ctx);
     for (const turn of thread.turns) {
       if (assistantRunTurns >= ASSISTANT_TURNS_PER_RUN_MAX) {
+        ctx.assistantLog.capSkips += 1;
         ctx.log("skipped:askAssistant (run turn cap)");
         return;
       }

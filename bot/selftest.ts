@@ -30,6 +30,7 @@ import {
   type SeedData,
 } from "./personas";
 import { planWorkspaceRename } from "./actions";
+import { formatAssistantBlock } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
   ARCHETYPE_STYLE,
@@ -1115,6 +1116,25 @@ check("the match rate never prints NaN (RF4)", () => {
   assert.strictEqual(formatMatchRate(2, 3), "2/3 (67%)");
   const allUnavailable = summarizeAssistant([{ intent: "spendSummary", scopeLabel: "valid", verdict: "unavailable" }], 0);
   assert.strictEqual(formatMatchRate(allUnavailable.inScopeMatch, allUnavailable.inScopeJudged), "0/0 (n/a)");
+});
+
+check("the run summary's assistant block totals every session and never prints NaN", () => {
+  assert.deepStrictEqual(formatAssistantBlock([]), [
+    "",
+    "assistant turns   0 (0 unavailable, 0 action(s) cut by the run turn cap)",
+    "in-scope match    0/0 (n/a)",
+  ]);
+  const lines = formatAssistantBlock([
+    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "match" }, { intent: "offTopic", scopeLabel: "valid", verdict: "match" }], capSkips: 1 },
+    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "miss" }, { intent: "addTransaction", scopeLabel: "valid", verdict: "unavailable" }], capSkips: 0 },
+  ]);
+  assert.strictEqual(lines[1], "assistant turns   4 (1 unavailable, 1 action(s) cut by the run turn cap)");
+  assert.strictEqual(lines[2], "in-scope match    1/2 (50%)");
+  const table = lines.slice(4).join("\n").split("\n");
+  assert.match(table[0], /^intent\s+turns\s+match\s+miss\s+overreach\s+unavailable$/);
+  assert.match(table[2], /^spendSummary\s+2\s+1\s+1\s+0\s+0$/);
+  assert.match(table[3], /^addTransaction\s+1\s+0\s+0\s+0\s+1$/);
+  assert.match(table[4], /^offTopic\s+1\s+1\s+0\s+0\s+0$/);
 });
 
 // --- Summary -----------------------------------------------------------------

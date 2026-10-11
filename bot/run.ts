@@ -82,9 +82,17 @@ import {
   selectOptionByText,
   think,
   type Action,
+  type AssistantSessionLog,
   type SessionCtx,
 } from "./actions";
-import { INTENT_MIX, createAssistantPlanner, newVisitorPromptData, promptDataFromSeed } from "./assistant-prompts";
+import {
+  INTENT_MIX,
+  createAssistantPlanner,
+  formatMatchRate,
+  newVisitorPromptData,
+  promptDataFromSeed,
+  summarizeAssistant,
+} from "./assistant-prompts";
 import { ARCHETYPES, PERSONAS, buildSeedData, type ActionName, type Persona, type SeedData } from "./personas";
 import { clearBrowserState, seedPersona } from "./seed";
 import {
@@ -395,6 +403,7 @@ interface SessionOutcome {
   error: string | null;
   url: string | null;
   screenshot: string | null;
+  assistant: AssistantSessionLog;
 }
 
 /**
@@ -675,6 +684,7 @@ async function runOneSession(
       planNow,
       focusShare: ASSISTANT_FOCUS_SHARE,
     }),
+    assistantLog: { turns: [], capSkips: 0 },
   };
 
   let context: BrowserContext | null = null;
@@ -725,6 +735,7 @@ async function runOneSession(
     error,
     url,
     screenshot,
+    assistant: ctx.assistantLog,
   };
 }
 
@@ -765,6 +776,7 @@ async function runPool(
               error: firstLine(err),
               url: null,
               screenshot: null,
+              assistant: { turns: [], capSkips: 0 },
             };
           }
         }
@@ -778,6 +790,29 @@ async function runPool(
 // =============================================================================
 // Summary
 // =============================================================================
+
+/** The run summary's assistant block: totals, the in-scope match rate, then one row per intent used. */
+export function formatAssistantBlock(logs: readonly AssistantSessionLog[]): string[] {
+  const summary = summarizeAssistant(
+    logs.flatMap((log) => log.turns),
+    logs.reduce((acc, log) => acc + log.capSkips, 0),
+  );
+  const lines = [
+    "",
+    `assistant turns   ${summary.turns} (${summary.unavailable} unavailable, ${summary.capSkips} action(s) cut by the run turn cap)`,
+    `in-scope match    ${formatMatchRate(summary.inScopeMatch, summary.inScopeJudged)}`,
+  ];
+  if (summary.rows.length > 0) {
+    lines.push(
+      "",
+      renderTable(
+        ["intent", "turns", "match", "miss", "overreach", "unavailable"],
+        summary.rows.map((row) => [row.intent, String(row.turns), String(row.match), String(row.miss), String(row.overreach), String(row.unavailable)]),
+      ),
+    );
+  }
+  return lines;
+}
 
 function printSummary(plan: SessionPlan, outcomes: SessionOutcome[], wallClockMs: number): void {
   const succeeded = outcomes.filter((outcome) => outcome.ok).length;
@@ -818,6 +853,7 @@ function printSummary(plan: SessionPlan, outcomes: SessionOutcome[], wallClockMs
       ["region", "planned", "ok", "failed", "new", "actions", "abandons", "actionFails"],
       regionRows,
     ),
+    ...formatAssistantBlock(outcomes.map((outcome) => outcome.assistant)),
   ];
 
   const failures = outcomes.filter((outcome) => !outcome.ok);
