@@ -1,6 +1,15 @@
 // Pure: the same inputs always give the same turns, so a run's prompts can be replayed exactly.
 
-import { makeRng, type Rng } from "./config";
+import {
+  ASSISTANT_NEW_CHAT_RATE,
+  ASSISTANT_PROMPT_MAX_CHARS,
+  ASSISTANT_SECOND_THREAD_RATE,
+  ASSISTANT_TURNS_PER_ACTION_MAX,
+  ASSISTANT_TURNS_PER_SESSION_MAX,
+  TRANSACTION_BACKDATE_MAX_DAYS,
+  makeRng,
+  type Rng,
+} from "./config";
 import type { Archetype, SeedData } from "./personas";
 import { CUSTOM_CATEGORY_SEEDS, DEFAULT_CATEGORY_SEEDS, type CategorySeed } from "./seed-data";
 
@@ -950,4 +959,406 @@ export function applyStyle(rendered: Part[], style: StyleProfile, knobs: StyleKn
     };
   }
   return { text, typing: [{ kind: "type", text }], typo: "none" };
+}
+
+export type TurnKind = "opener" | `followup:${FollowUpKind}`;
+
+export interface Turn {
+  intent: Intent;
+  shape: Shape;
+  kind: TurnKind;
+  register: Register | "any";
+  scope: Scope;
+  scopeLabel: ScopeLabel;
+  /** The scope's period kind, or "-" when the turn names none. */
+  period: string;
+  expect: Expect;
+  /** Exactly what the composer holds when the turn is sent. */
+  text: string;
+  typing: TypingStep[];
+  typo: Typo;
+  /** Rendered slot values before the lowercase habit, so a check can prove no typo landed in one. */
+  slotValues: string[];
+  charDelayMs: number;
+  send: "enter" | "click";
+}
+
+interface Gen {
+  rng: Rng;
+  knobs: StyleKnobs;
+  style: StyleProfile;
+  data: PromptData;
+  mix: Record<Intent, number>;
+  focus: Cell;
+  focusShare: number;
+}
+
+const TARGET_LOOKBACK_DAYS = 90;
+const AMBIGUOUS_LOOKBACK_DAYS = 60;
+const INVENTED_CATEGORIES: readonly string[] = ["Yachts", "Crypto", "Lottery", "Racehorses", "Fireworks"];
+const FALLBACK_CELL: Cell = { intent: "spendSummary", shape: "all" };
+
+function formatAmount(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function roundToHalf(value: number): number {
+  return Math.max(0.5, Math.round(value * 2) / 2);
+}
+
+/** ×0.6–1.4 rounded to 0.50, never the original amount. */
+function shiftedAmount(original: number, rng: Rng): number {
+  const shifted = roundToHalf(original * (0.6 + rng.next() * 0.8));
+  return shifted === original ? shifted + 0.5 : shifted;
+}
+
+function categoriesOf(data: PromptData, type: "expense" | "income"): PromptCategory[] {
+  return data.categories.filter((category) => category.scope === type || category.scope === "both");
+}
+
+function txCount(data: PromptData, name: string): number {
+  return data.transactions.filter((tx) => tx.categoryName === name).length;
+}
+
+function pickCategory(gen: Gen, type: "expense" | "income", exclude?: string): PromptCategory {
+  const pool = categoriesOf(gen.data, type).filter((category) => category.name !== exclude);
+  return gen.rng.weighted(pool, (category) => Math.max(1, txCount(gen.data, category.name)));
+}
+
+/** "coffee" for "Coffee", "uber" for "Uber ride", the whole phrase when the first word is too short to search on ("gas fill-up"). */
+export function searchText(description: string): string {
+  const lower = description.toLowerCase();
+  const first = lower.split(" ")[0];
+  return first.length >= 4 ? first : lower;
+}
+
+function searchTexts(data: PromptData): string[] {
+  return [...new Set(data.transactions.map((tx) => searchText(tx.description)))];
+}
+
+function pairKey(tx: { description: string; date: string }): string {
+  return `${tx.description.toLowerCase()}|${tx.date}`;
+}
+
+function pairCounts(data: PromptData): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const tx of data.transactions) counts.set(pairKey(tx), (counts.get(pairKey(tx)) ?? 0) + 1);
+  return counts;
+}
+
+function uniqueTargets(data: PromptData): PromptTransaction[] {
+  const counts = pairCounts(data);
+  const from = addDays(data.today, -(TARGET_LOOKBACK_DAYS - 1));
+  return data.transactions.filter(
+    (tx) => tx.type === "expense" && tx.date >= from && tx.date <= data.today && counts.get(pairKey(tx)) === 1,
+  );
+}
+
+function ambiguousDescriptions(data: PromptData): string[] {
+  const from = addDays(data.today, -(AMBIGUOUS_LOOKBACK_DAYS - 1));
+  const counts = new Map<string, number>();
+  for (const tx of data.transactions) {
+    if (tx.date < from || tx.date > data.today) continue;
+    const key = tx.description.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].filter(([, count]) => count >= 2).map(([description]) => description);
+}
+
+function categoriesWithSpend(data: PromptData): PromptCategory[] {
+  return categoriesOf(data, "expense").filter((category) => txCount(data, category.name) > 0);
+}
+
+export function cellFillable(cell: Cell, data: PromptData): boolean {
+  if (cell.intent === "editTransaction" || cell.intent === "deleteTransaction") return uniqueTargets(data).length > 0;
+  if (cell.intent === "findTransactions" && cell.shape === "text") return data.transactions.length > 0;
+  if (cell.intent === "findTransactions" && cell.shape === "amountRange") return categoriesWithSpend(data).length > 0;
+  if (cell.intent === "clarify" && cell.shape === "ambiguousTarget") return ambiguousDescriptions(data).length > 0;
+  return true;
+}
+
+function buildRange(amounts: number[], rng: Rng): AmountRange {
+  const x = rng.pick(amounts);
+  const unit = x < 100 ? 5 : 10;
+  const op = rng.pick(["over", "under", "between"]);
+  const below = (factor: number): number => Math.floor((x * factor) / unit) * unit;
+  if (op === "over" && below(0.9) >= unit) return { op, value: below(0.9) };
+  if (op === "between" && below(0.8) >= unit) return { op, low: below(0.8), high: Math.ceil((x * 1.2) / unit) * unit };
+  return { op: "under", value: Math.ceil((x * 1.1) / unit) * unit };
+}
+
+function renderRange(range: AmountRange): string {
+  if (range.op === "between") return `between ${range.low} and ${range.high}`;
+  return `${range.op} ${range.value}`;
+}
+
+function renderTarget(target: TargetRef, data: PromptData): string {
+  const description = target.description.toLowerCase();
+  return target.date === addDays(data.today, -1) ? `yesterday's ${description}` : `the ${description} on ${shortDate(target.date)}`;
+}
+
+function addAmount(gen: Gen, seed: CategorySeed): number {
+  if (gen.rng.chance(gen.knobs.amountDecimals)) return gen.rng.int(seed.amountMin * 100, seed.amountMax * 100) / 100;
+  return gen.rng.int(seed.amountMin, seed.amountMax);
+}
+
+function fillScope(cell: Cell, slots: readonly SlotName[], gen: Gen): Scope {
+  const { rng, data } = gen;
+  const type = cell.intent === "incomeSummary" ? "income" : "expense";
+  const scope: Scope = { type };
+  const uses = (slot: SlotName): boolean => slots.includes(slot);
+  switch (cell.intent) {
+    case "addTransaction":
+    case "clarify": {
+      if (cell.shape === "ambiguousTarget") {
+        scope.ambiguous = rng.pick(ambiguousDescriptions(data));
+        break;
+      }
+      const category = pickCategory(gen, "expense");
+      scope.category = category.name;
+      scope.description = rng.pick(category.seed.descriptions).toLowerCase();
+      scope.amount = addAmount(gen, category.seed);
+      if (uses("date")) scope.date = addDays(data.today, -rng.int(1, TRANSACTION_BACKDATE_MAX_DAYS));
+      break;
+    }
+    case "editTransaction":
+    case "deleteTransaction": {
+      const target = rng.pick(uniqueTargets(data));
+      scope.target = { description: target.description, date: target.date };
+      if (uses("newAmount")) scope.newAmount = shiftedAmount(target.amount, rng);
+      if (uses("newCategory")) scope.newCategory = pickCategory(gen, "expense", target.categoryName).name;
+      if (uses("newDate")) {
+        const delta = rng.pick([-5, -4, -3, -2, -1, 1, 2, 3, 4, 5]);
+        const moved = addDays(target.date, delta);
+        scope.newDate = moved > data.today ? addDays(target.date, -delta) : moved;
+      }
+      break;
+    }
+    case "findTransactions":
+      if (cell.shape === "text") scope.text = rng.pick(searchTexts(data));
+      if (cell.shape === "category") scope.category = pickCategory(gen, "expense").name;
+      if (cell.shape === "amountRange") {
+        const category = rng.weighted(categoriesWithSpend(data), (c) => txCount(data, c.name));
+        scope.category = category.name;
+        scope.range = buildRange(data.transactions.filter((tx) => tx.categoryName === category.name).map((tx) => tx.amount), rng);
+      }
+      break;
+    case "topTransactions":
+      scope.order = rng.chance(0.8) ? "biggest" : "smallest";
+      if (uses("limit")) scope.limit = rng.pick([...TOP_LIMITS]);
+      if (cell.shape === "category") scope.category = pickCategory(gen, "expense").name;
+      break;
+    case "spendSummary":
+    case "incomeSummary":
+      if (cell.shape === "category") scope.category = pickCategory(gen, type).name;
+      break;
+    default:
+      break;
+  }
+  if (uses("period")) scope.period = drawPeriod(data, rng);
+  return scope;
+}
+
+const INVALID_SLOTS: Record<InvalidKind, readonly SlotName[]> = {
+  category: ["category", "newCategory"],
+  period: ["period"],
+  target: ["target"],
+};
+
+function invalidKinds(slots: readonly SlotName[]): InvalidKind[] {
+  return (["category", "period", "target"] as const).filter((kind) => INVALID_SLOTS[kind].some((slot) => slots.includes(slot)));
+}
+
+function applyInvalid(scope: Scope, kind: InvalidKind, slots: readonly SlotName[], gen: Gen): Scope {
+  const { rng, data } = gen;
+  if (kind === "period") return { ...scope, period: invalidPeriod(data, rng) };
+  if (kind === "category") {
+    const absent = [...CUSTOM_CATEGORY_SEEDS.map((seed) => seed.name), ...INVENTED_CATEGORIES].filter(
+      (name) => !data.categories.some((category) => sameName(category.name, name)),
+    );
+    const name = rng.pick(absent);
+    return slots.includes("newCategory") ? { ...scope, newCategory: name } : { ...scope, category: name };
+  }
+  const real = rng.pick(uniqueTargets(data));
+  const taken = new Set(data.transactions.filter((tx) => sameName(tx.description, real.description)).map((tx) => tx.date));
+  const free = Array.from({ length: TARGET_LOOKBACK_DAYS }, (_, i) => addDays(data.today, -i)).filter((date) => !taken.has(date));
+  if (free.length === 0) throw new Error(`"${real.description}" fills every day of the lookback; no invalid target exists`);
+  return { ...scope, target: { description: real.description, date: rng.pick(free) } };
+}
+
+function slotValues(scope: Scope, data: PromptData, rng: Rng): SlotValues {
+  const values: SlotValues = {};
+  if (scope.category !== undefined) values.category = scope.category;
+  if (scope.newCategory !== undefined) values.newCategory = scope.newCategory;
+  if (scope.period !== undefined) values.period = scope.period.label;
+  if (scope.amount !== undefined) values.amount = formatAmount(scope.amount);
+  if (scope.newAmount !== undefined) values.newAmount = formatAmount(scope.newAmount);
+  if (scope.description !== undefined) values.description = scope.description;
+  if (scope.date !== undefined) values.date = scope.date === addDays(data.today, -1) ? "yesterday" : `on ${shortDate(scope.date)}`;
+  if (scope.newDate !== undefined) values.newDate = shortDate(scope.newDate);
+  if (scope.text !== undefined) values.text = scope.text;
+  if (scope.range !== undefined) values.range = renderRange(scope.range);
+  if (scope.limit !== undefined) values.limit = String(scope.limit);
+  if (scope.order !== undefined) values.order = rng.pick(scope.order === "biggest" ? ["biggest", "largest"] : ["smallest", "cheapest"]);
+  if (scope.target !== undefined) {
+    values.target = renderTarget(scope.target, data);
+    values.candidate = shortDate(scope.target.date);
+  }
+  if (scope.ambiguous !== undefined) values.ambiguous = scope.ambiguous;
+  return values;
+}
+
+type TurnBase = Omit<Turn, "text" | "typing" | "typo" | "slotValues" | "charDelayMs" | "send" | "period">;
+
+function finishTurn(gen: Gen, base: TurnBase, template: string): Turn {
+  const parts = renderTemplate(template, slotValues(base.scope, gen.data, gen.rng), gen.rng);
+  const styled = applyStyle(parts, gen.style, gen.knobs, gen.rng);
+  if (styled.text.length > ASSISTANT_PROMPT_MAX_CHARS) throw new Error(`a generated prompt is ${styled.text.length} chars: "${styled.text}"`);
+  return {
+    ...base,
+    ...styled,
+    period: base.scope.period === undefined ? "-" : base.scope.period.kind,
+    slotValues: parts.filter((part) => part.slot).map((part) => part.text),
+    charDelayMs: gen.rng.int(gen.knobs.charDelayMs.min, gen.knobs.charDelayMs.max),
+    send: gen.rng.chance(gen.knobs.sendClick) ? "click" : "enter",
+  };
+}
+
+function cellsOf(intent: Intent): Cell[] {
+  return CELLS.filter((cell) => cell.intent === intent);
+}
+
+function shapeWeight(cell: Cell): number {
+  if (cell.intent !== "addTransaction") return 1;
+  return { full: 40, inferCategory: 45, pastDate: 15 }[cell.shape];
+}
+
+const DRAW_ATTEMPTS = 5;
+
+/** An intent from `mix`, then a shape the data can fill; null after five unfillable draws. */
+export function drawCell(rng: Rng, mix: Record<Intent, number>, data: PromptData): Cell | null {
+  const intents = INTENTS.filter((intent) => mix[intent] > 0);
+  for (let attempt = 0; attempt < DRAW_ATTEMPTS; attempt++) {
+    const shapes = cellsOf(rng.weighted(intents, (intent) => mix[intent])).filter((cell) => cellFillable(cell, data));
+    if (shapes.length > 0) return rng.weighted(shapes, shapeWeight);
+  }
+  return null;
+}
+
+/** Stateless coverage: day d favours CELLS[d mod 28], so every cell is favoured once every 28 days. */
+export function focusCell(planNow: Date): Cell {
+  return CELLS[Math.floor(planNow.getTime() / MS_PER_DAY) % CELLS.length];
+}
+
+function templatesFor(cell: Cell, register: Register): Template[] {
+  return OPENER_TEMPLATES.filter(
+    (t) => t.intent === cell.intent && t.shape === cell.shape && (t.register === register || t.register === "any"),
+  );
+}
+
+function canBeInvalid(template: Template): boolean {
+  return invalidKinds(template.slots).length > 0;
+}
+
+function makeOpener(gen: Gen): Turn {
+  const { rng, data } = gen;
+  const focusRoll = rng.chance(gen.focusShare);
+  const invalidRoll = rng.chance(gen.knobs.invalidScope);
+  const register = rng.weighted([...REGISTERS], (r) => gen.style.registerWeights[r]);
+  const useFocus = focusRoll && gen.mix[gen.focus.intent] > 0 && cellFillable(gen.focus, data);
+  const drawn = useFocus ? gen.focus : drawCell(rng, gen.mix, data);
+  let cell: Cell = drawn ?? FALLBACK_CELL;
+  let pool = drawn === null ? templatesFor(cell, register).filter((t) => t.slots.includes("period")) : templatesFor(cell, register);
+  const invalid = invalidRoll && IN_SCOPE_INTENTS.includes(cell.intent);
+  if (invalid && !pool.some(canBeInvalid)) {
+    // Moves to a sibling shape so the invalid share holds; e.g. inferCategory names no category to get wrong.
+    const sibling = cellsOf(cell.intent).find((c) => cellFillable(c, data) && templatesFor(c, register).some(canBeInvalid));
+    if (sibling === undefined) throw new Error(`no ${cell.intent} shape can carry an invalid scope in the ${register} register`);
+    cell = sibling;
+    pool = templatesFor(cell, register);
+  }
+  const template = rng.pick(invalid ? pool.filter(canBeInvalid) : pool);
+  let scope = fillScope(cell, template.slots, gen);
+  if (drawn === null) scope = { ...scope, period: buildPeriod("thisMonth", data, rng) };
+  let scopeLabel: ScopeLabel = "valid";
+  if (invalid) {
+    const kind = rng.pick(invalidKinds(template.slots));
+    scope = applyInvalid(scope, kind, template.slots, gen);
+    scopeLabel = `invalid:${kind}`;
+  }
+  return finishTurn(
+    gen,
+    {
+      intent: cell.intent,
+      shape: cell.shape,
+      kind: "opener",
+      register: template.register,
+      scope,
+      scopeLabel,
+      expect: scopeLabel === "valid" ? INTENT_EXPECT[cell.intent] : NO_WRITES,
+    },
+    template.text,
+  );
+}
+
+export interface PlannerInput {
+  sessionSeed: string;
+  /** `persona.id` for a returning persona, the session seed for a new visitor. */
+  styleKey: string;
+  archetype: Archetype;
+  /** `INTENT_MIX[archetype]` in a real session; checks pass other mixes. */
+  mix: Record<Intent, number>;
+  data: PromptData;
+  planNow: Date;
+  focusShare: number;
+}
+
+export interface ThreadPlan {
+  /** Click New chat before this thread when the log already holds messages. */
+  newChat: boolean;
+  turns: Turn[];
+}
+
+export interface ActionPlan {
+  threads: ThreadPlan[];
+}
+
+export interface AssistantPlanner {
+  style: StyleProfile;
+  turnsLeft: () => number;
+  /** The next askAssistant's threads; empty once the session cap is spent. */
+  nextAction: () => ActionPlan;
+}
+
+/** Owns its RNG stream so prompt text never depends on model replies or on which UI actions ran first. */
+export function createAssistantPlanner(input: PlannerInput): AssistantPlanner {
+  const style = styleProfile(input.archetype, input.styleKey);
+  const gen: Gen = {
+    rng: makeRng(`assistant:${input.sessionSeed}`),
+    knobs: ARCHETYPE_STYLE[input.archetype],
+    style,
+    data: input.data,
+    mix: input.mix,
+    focus: focusCell(input.planNow),
+    focusShare: input.focusShare,
+  };
+  let used = 0;
+  return {
+    style,
+    turnsLeft: () => ASSISTANT_TURNS_PER_SESSION_MAX - used,
+    nextAction: () => {
+      const threads: ThreadPlan[] = [];
+      const threadCount = gen.rng.chance(ASSISTANT_SECOND_THREAD_RATE) ? 2 : 1;
+      let actionTurns = 0;
+      const room = (): boolean => actionTurns < ASSISTANT_TURNS_PER_ACTION_MAX && used < ASSISTANT_TURNS_PER_SESSION_MAX;
+      for (let t = 0; t < threadCount && room(); t++) {
+        const newChat = gen.rng.chance(ASSISTANT_NEW_CHAT_RATE);
+        const turns = [makeOpener(gen)];
+        used += 1;
+        actionTurns += 1;
+        threads.push({ newChat, turns });
+      }
+      return { threads };
+    },
+  };
 }

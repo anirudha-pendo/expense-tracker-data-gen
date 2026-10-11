@@ -12,6 +12,8 @@ import {
   sessionsForRegion,
   makeRng,
   NEW_VISITOR_ARCHETYPE,
+  ASSISTANT_FOCUS_SHARE,
+  ASSISTANT_TURNS_PER_SESSION_MAX,
   type Region,
 } from "./config";
 import {
@@ -35,19 +37,27 @@ import {
   INTENT_EXPECT,
   INTENT_MIX,
   IN_SCOPE_INTENTS,
+  NO_WRITES,
   OPENER_TEMPLATES,
   SHAPES,
   applyStyle,
+  cellFillable,
+  createAssistantPlanner,
+  drawCell,
   drawPeriod,
+  focusCell,
   invalidPeriod,
   isScopeValid,
   newVisitorPromptData,
   promptDataFromSeed,
   renderTemplate,
+  searchText,
   styleProfile,
   templateSlots,
   verdict,
+  type AssistantPlanner,
   type Expect,
+  type Intent,
   type Period,
   type PromptData,
   type Register,
@@ -57,6 +67,7 @@ import {
   type StyleKnobs,
   type StyleProfile,
   type Template,
+  type Turn,
   type TypingStep,
   type Verdict,
 } from "./assistant-prompts";
@@ -762,6 +773,209 @@ check("styled text replays exactly from its keystrokes, and a typo never touches
     }
   }
   assert.ok(corrected > 100 && kept > 100, `typo paths not exercised: corrected ${corrected}, kept ${kept}`);
+});
+
+function plannerFor(persona: Persona, sessionSeed: string, options: { now?: Date; focusShare?: number } = {}): AssistantPlanner {
+  const now = options.now ?? TEST_NOW;
+  return createAssistantPlanner({
+    sessionSeed,
+    styleKey: persona.id,
+    archetype: persona.archetype,
+    mix: INTENT_MIX[persona.archetype],
+    data: assistantData(persona, now),
+    planNow: now,
+    focusShare: options.focusShare ?? ASSISTANT_FOCUS_SHARE,
+  });
+}
+
+function firstOpener(planner: AssistantPlanner): Turn {
+  return planner.nextAction().threads[0].turns[0];
+}
+
+function sessionTurns(planner: AssistantPlanner): Turn[] {
+  const turns: Turn[] = [];
+  while (planner.turnsLeft() > 0) {
+    for (const thread of planner.nextAction().threads) turns.push(...thread.turns);
+  }
+  return turns;
+}
+
+function personasOf(archetype: Archetype): Persona[] {
+  return PERSONAS.filter((persona) => persona.archetype === archetype);
+}
+
+check("searchText keeps one searchable word, or the phrase when the first word is short", () => {
+  assert.strictEqual(searchText("Coffee"), "coffee");
+  assert.strictEqual(searchText("Uber ride"), "uber");
+  assert.strictEqual(searchText("Gas fill-up"), "gas fill-up");
+});
+
+check("focusCell walks the 28 cells in order, one per UTC day", () => {
+  const seen = new Set<string>();
+  for (let day = 0; day < 28; day++) {
+    const cell = focusCell(new Date(Date.UTC(2026, 8, 1, 23, 59) + day * 86_400_000));
+    seen.add(`${cell.intent}/${cell.shape}`);
+  }
+  assert.strictEqual(seen.size, 28);
+  assert.deepStrictEqual(focusCell(new Date("2026-09-04T00:00:00.000Z")), focusCell(new Date("2026-09-04T23:59:59.999Z")));
+});
+
+check("same session seed, persona and date give the same six turns; 100 seeds give 90+ distinct first turns (AC3)", () => {
+  const persona = PERSONAS[0];
+  const first = sessionTurns(plannerFor(persona, "session:2026-09-04T10:00:00.000Z:1"));
+  const second = sessionTurns(plannerFor(persona, "session:2026-09-04T10:00:00.000Z:1"));
+  assert.strictEqual(first.length, ASSISTANT_TURNS_PER_SESSION_MAX);
+  assert.deepStrictEqual(first, second);
+  const texts = new Set(Array.from({ length: 100 }, (_, i) => firstOpener(plannerFor(persona, `session:x:${i}`)).text));
+  assert.ok(texts.size >= 90, `only ${texts.size} distinct first turns`);
+});
+
+check("turn text never depends on the session's action RNG (AC4)", () => {
+  const persona = PERSONAS[3];
+  const seed = "session:2026-09-04T10:00:00.000Z:7";
+  const untouched = sessionTurns(plannerFor(persona, seed));
+  const actionRng = makeRng(seed);
+  for (let i = 0; i < 1000; i++) actionRng.next();
+  assert.deepStrictEqual(sessionTurns(plannerFor(persona, seed)), untouched);
+});
+
+check("opener intent shares match the archetype mix within 3 points with focus off (AC5)", () => {
+  for (const archetype of ARCHETYPE_LIST) {
+    const members = personasOf(archetype);
+    const turns = Array.from({ length: 3000 }, (_, i) => firstOpener(plannerFor(members[i % members.length], `mix:${archetype}:${i}`, { focusShare: 0 })));
+    for (const intent of INTENTS) {
+      const share = (turns.filter((t) => t.intent === intent).length / turns.length) * 100;
+      const target = INTENT_MIX[archetype][intent];
+      if (target === 0) assert.strictEqual(share, 0, `${archetype} drew zero-weight ${intent}`);
+      assert.ok(Math.abs(share - target) <= 3, `${archetype}.${intent}: ${share.toFixed(1)}% vs ${target}%`);
+    }
+  }
+});
+
+const FOCUS_DAYS = Array.from({ length: 28 }, (_, day) => new Date(Date.UTC(2026, 8, 1) + day * 86_400_000));
+
+function isCell(turn: Turn, cell: { intent: Intent; shape: string }): boolean {
+  return turn.intent === cell.intent && turn.shape === cell.shape;
+}
+
+check("the focus cell wins every opener a persona can take it in, so 28 days cover all 28 cells (AC6)", () => {
+  const seen = new Set<string>();
+  for (const now of FOCUS_DAYS) {
+    const focus = focusCell(now);
+    let hits = 0;
+    PERSONAS.forEach((persona, i) => {
+      const turn = firstOpener(plannerFor(persona, `session:${now.toISOString()}:${i + 1}`, { now, focusShare: 1 }));
+      const eligible = INTENT_MIX[persona.archetype][focus.intent] > 0 && cellFillable(focus, assistantData(persona, now));
+      if (!eligible) assert.ok(!isCell(turn, focus), `${persona.id} cannot take ${focus.intent}/${focus.shape} yet drew it`);
+      // An invalid scope may move to a sibling shape of the same intent when the focus shape names nothing to get wrong.
+      else if (!isCell(turn, focus)) assert.ok(turn.intent === focus.intent && turn.scopeLabel !== "valid", `${persona.id} skipped focus for ${turn.intent}/${turn.shape}`);
+      if (isCell(turn, focus)) hits++;
+    });
+    assert.ok(hits >= 1, `${now.toISOString().slice(0, 10)}: no persona can take focus ${focus.intent}/${focus.shape}`);
+    seen.add(`${focus.intent}/${focus.shape}`);
+  }
+  assert.strictEqual(seen.size, 28);
+});
+
+check("at the real focus share, 28 days of fleet openers draw every cell and each day's focus cell (AC6)", () => {
+  const seen = new Set<string>();
+  for (const now of FOCUS_DAYS) {
+    const focus = focusCell(now);
+    let hits = 0;
+    // Ten sessions per persona a day keeps the expected focus hits far above zero, so a change in draw order cannot flip this check.
+    for (let session = 0; session < 10; session++) {
+      PERSONAS.forEach((persona, i) => {
+        const turn = firstOpener(plannerFor(persona, `session:${now.toISOString()}:${session}:${i + 1}`, { now }));
+        seen.add(`${turn.intent}/${turn.shape}`);
+        if (isCell(turn, focus)) hits++;
+      });
+    }
+    assert.ok(hits >= 1, `${now.toISOString().slice(0, 10)}: focus ${focus.intent}/${focus.shape} never drawn`);
+  }
+  assert.strictEqual(seen.size, 28, `cells never drawn: ${CELLS.map((c) => `${c.intent}/${c.shape}`).filter((k) => !seen.has(k))}`);
+});
+
+check("valid openers pass isScopeValid, invalid ones fail it, at the archetype's rate (AC7)", () => {
+  const tallies = new Map<Archetype, { inScope: number; invalid: number }>();
+  for (const persona of PERSONAS) {
+    const data = assistantData(persona);
+    const tally = tallies.get(persona.archetype) ?? { inScope: 0, invalid: 0 };
+    for (let i = 0; i < 500; i++) {
+      const turn = firstOpener(plannerFor(persona, `valid:${persona.id}:${i}`));
+      const ok = isScopeValid(turn.scope, data);
+      assert.strictEqual(ok, turn.scopeLabel === "valid", `${turn.scopeLabel} turn "${turn.text}" validated as ${ok}`);
+      if (turn.scopeLabel !== "valid") assert.deepStrictEqual(turn.expect, NO_WRITES);
+      if (IN_SCOPE_INTENTS.includes(turn.intent)) {
+        tally.inScope++;
+        if (turn.scopeLabel !== "valid") tally.invalid++;
+      } else {
+        assert.strictEqual(turn.scopeLabel, "valid", `off-path ${turn.intent} got an invalid scope`);
+      }
+    }
+    tallies.set(persona.archetype, tally);
+  }
+  for (const [archetype, tally] of tallies) {
+    const share = (tally.invalid / tally.inScope) * 100;
+    const target = ARCHETYPE_STYLE[archetype].invalidScope * 100;
+    assert.ok(Math.abs(share - target) <= 3, `${archetype} invalid share ${share.toFixed(1)}% vs ${target}%`);
+  }
+});
+
+check("valid openers name only the persona's own categories, custom ones included (AC8)", () => {
+  const persona = PERSONAS.find((p) => buildSeedData(p, TEST_NOW).categories.some((c) => !c.isDefault));
+  assert.ok(persona, "no persona has a custom category");
+  const data = assistantData(persona);
+  const own = new Set(data.categories.map((c) => c.name.toLowerCase()));
+  const custom = new Set(buildSeedData(persona, TEST_NOW).categories.filter((c) => !c.isDefault).map((c) => c.name));
+  let namedCustom = 0;
+  for (let i = 0; i < 400; i++) {
+    for (const turn of sessionTurns(plannerFor(persona, `own:${i}`))) {
+      if (turn.scopeLabel !== "valid") continue;
+      for (const name of [turn.scope.category, turn.scope.newCategory]) {
+        if (name === undefined) continue;
+        assert.ok(own.has(name.toLowerCase()), `"${name}" is not in ${persona.username}'s workspace`);
+        if (custom.has(name)) namedCustom++;
+      }
+    }
+  }
+  assert.ok(namedCustom >= 1, "no valid turn named a custom category");
+});
+
+check("5,000 fleet openers give 1,500+ distinct texts, none above 2% (AC10)", () => {
+  const counts = new Map<string, number>();
+  for (let i = 0; i < 5000; i++) {
+    const text = firstOpener(plannerFor(PERSONAS[i % PERSONAS.length], `fleet:${i}`)).text;
+    counts.set(text, (counts.get(text) ?? 0) + 1);
+  }
+  assert.ok(counts.size >= 1500, `only ${counts.size} distinct openers`);
+  const top = Math.max(...counts.values());
+  assert.ok(top / 5000 <= 0.02, `most common opener is ${((top / 5000) * 100).toFixed(1)}%`);
+});
+
+check("new visitors never get cells an empty workspace cannot fill; the fallback is spendSummary/all this month", () => {
+  const data = newVisitorPromptData(TEST_NOW);
+  for (let i = 0; i < 2000; i++) {
+    const turn = firstOpener(
+      createAssistantPlanner({ sessionSeed: `nv:${i}`, styleKey: `nv:${i}`, archetype: "explorer", mix: INTENT_MIX.explorer, data, planNow: TEST_NOW, focusShare: ASSISTANT_FOCUS_SHARE }),
+    );
+    assert.ok(!["editTransaction", "deleteTransaction"].includes(turn.intent), `new visitor got ${turn.intent}`);
+    assert.ok(!(turn.intent === "clarify" && turn.shape === "ambiguousTarget"));
+    assert.ok(!(turn.intent === "findTransactions" && (turn.shape === "text" || turn.shape === "amountRange")));
+    assert.strictEqual(isScopeValid(turn.scope, data), turn.scopeLabel === "valid", turn.text);
+  }
+  const onlyEdits: Record<Intent, number> = { ...INTENT_MIX.power };
+  for (const intent of INTENTS) onlyEdits[intent] = intent === "editTransaction" ? 100 : 0;
+  assert.strictEqual(drawCell(makeRng("fallback"), onlyEdits, data), null);
+  let validFallbacks = 0;
+  for (let i = 0; i < 40; i++) {
+    const turn = firstOpener(createAssistantPlanner({ sessionSeed: `fb:${i}`, styleKey: `fb:${i}`, archetype: "power", mix: onlyEdits, data, planNow: TEST_NOW, focusShare: 0 }));
+    assert.strictEqual(`${turn.intent}/${turn.shape}`, "spendSummary/all");
+    if (turn.scopeLabel === "valid") {
+      assert.strictEqual(turn.period, "thisMonth");
+      validFallbacks++;
+    }
+  }
+  assert.ok(validFallbacks > 0);
 });
 
 // --- Summary -----------------------------------------------------------------
