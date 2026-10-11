@@ -1,6 +1,7 @@
 // Pure: the same inputs always give the same turns, so a run's prompts can be replayed exactly.
 
 import {
+  ASSISTANT_FOLLOWUPS_MAX,
   ASSISTANT_NEW_CHAT_RATE,
   ASSISTANT_PROMPT_MAX_CHARS,
   ASSISTANT_SECOND_THREAD_RATE,
@@ -1301,6 +1302,98 @@ function makeOpener(gen: Gen): Turn {
   );
 }
 
+const SUMMARY_INTENTS: readonly Intent[] = ["spendSummary", "incomeSummary", "findTransactions", "topTransactions"];
+const CATEGORY_SHIFT_INTENTS: readonly Intent[] = ["spendSummary", "findTransactions", "topTransactions"];
+
+/** A transaction with the parent's ambiguous description whose date tells it apart. */
+function candidateFor(parent: Turn, data: PromptData): PromptTransaction | undefined {
+  const { ambiguous } = parent.scope;
+  if (ambiguous === undefined) return undefined;
+  const counts = pairCounts(data);
+  return data.transactions.find((tx) => sameName(tx.description, ambiguous) && counts.get(pairKey(tx)) === 1);
+}
+
+function followUpKinds(parent: Turn, data: PromptData): FollowUpKind[] {
+  const kinds: FollowUpKind[] = ["thanks"];
+  if (SUMMARY_INTENTS.includes(parent.intent)) kinds.push("periodShift");
+  if (CATEGORY_SHIFT_INTENTS.includes(parent.intent)) kinds.push("categoryShift");
+  if (parent.intent === "findTransactions" || parent.intent === "topTransactions") kinds.push("refine");
+  if (parent.intent === "addTransaction" && parent.scope.amount !== undefined) kinds.push("amountFix");
+  if (parent.kind === "opener" && (parent.shape === "missingAmount" || parent.shape === "missingWhat")) kinds.push("answerClarify");
+  if (parent.kind === "opener" && parent.shape === "ambiguousTarget" && candidateFor(parent, data) !== undefined) kinds.push("pickCandidate");
+  return kinds;
+}
+
+const FOLLOWUP_EXPECT: Record<Exclude<FollowUpKind, "periodShift" | "categoryShift">, Expect> = {
+  refine: { must: ["findTransactions"], forbid: WRITE_TOOLS },
+  amountFix: { must: ["addTransaction", "updateTransaction"], forbid: [] },
+  answerClarify: { must: ["addTransaction"], forbid: [] },
+  pickCandidate: { must: ["updateTransaction", "deleteTransaction"], forbid: [] },
+  thanks: NO_TOOLS,
+};
+
+/** Replacing the slot that was wrong makes the scope valid again; any other change keeps the label. */
+function relabel(label: ScopeLabel, replaced: InvalidKind): ScopeLabel {
+  return label === `invalid:${replaced}` ? "valid" : label;
+}
+
+function makeFollowUp(gen: Gen, parent: Turn): Turn {
+  const { rng, data } = gen;
+  const kind = rng.pick(followUpKinds(parent, data));
+  let scope: Scope = { ...parent.scope };
+  let scopeLabel = parent.scopeLabel;
+  let intent = parent.intent;
+  let shape = parent.shape;
+  let required: SlotName = "period";
+  switch (kind) {
+    case "periodShift":
+      scope.period = drawPeriod(data, rng, parent.scope.period?.kind);
+      scopeLabel = relabel(scopeLabel, "period");
+      break;
+    case "categoryShift":
+      scope.category = pickCategory(gen, "expense", parent.scope.category).name;
+      scope.range = undefined;
+      scopeLabel = relabel(scopeLabel, "category");
+      required = "category";
+      break;
+    case "refine":
+      scope.limit = rng.pick(TOP_LIMITS.filter((limit) => limit !== parent.scope.limit));
+      required = "limit";
+      break;
+    case "amountFix": {
+      const { amount } = parent.scope;
+      if (amount === undefined) throw new Error("amountFix was drawn for a parent with no amount");
+      scope.amount = shiftedAmount(amount, rng);
+      required = "amount";
+      break;
+    }
+    case "answerClarify":
+      required = parent.shape === "missingAmount" ? "amount" : "description";
+      break;
+    case "pickCandidate": {
+      const candidate = candidateFor(parent, data);
+      if (candidate === undefined) throw new Error("pickCandidate was drawn with no unique candidate");
+      scope.target = { description: candidate.description, date: candidate.date };
+      required = "candidate";
+      break;
+    }
+    case "thanks":
+      scope = { type: "expense" };
+      scopeLabel = "valid";
+      intent = "meta";
+      shape = "feedback";
+      break;
+  }
+  const pool = FOLLOWUP_TEMPLATES.filter((t) => t.kind === kind && (kind === "thanks" || t.slots.includes(required)));
+  const template = rng.pick(pool);
+  const base = kind === "periodShift" || kind === "categoryShift" ? INTENT_EXPECT[intent] : FOLLOWUP_EXPECT[kind];
+  return finishTurn(
+    gen,
+    { intent, shape, kind: `followup:${kind}`, register: "any", scope, scopeLabel, expect: scopeLabel === "valid" ? base : NO_WRITES },
+    template.text,
+  );
+}
+
 export interface PlannerInput {
   sessionSeed: string;
   /** `persona.id` for a returning persona, the session seed for a new visitor. */
@@ -1356,6 +1449,16 @@ export function createAssistantPlanner(input: PlannerInput): AssistantPlanner {
         const turns = [makeOpener(gen)];
         used += 1;
         actionTurns += 1;
+        while (
+          turns.length <= ASSISTANT_FOLLOWUPS_MAX &&
+          room() &&
+          turns[turns.length - 1].kind !== "followup:thanks" &&
+          gen.rng.chance(gen.knobs.followUp)
+        ) {
+          turns.push(makeFollowUp(gen, turns[turns.length - 1]));
+          used += 1;
+          actionTurns += 1;
+        }
         threads.push({ newChat, turns });
       }
       return { threads };

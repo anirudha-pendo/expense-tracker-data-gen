@@ -13,6 +13,9 @@ import {
   makeRng,
   NEW_VISITOR_ARCHETYPE,
   ASSISTANT_FOCUS_SHARE,
+  ASSISTANT_FOLLOWUPS_MAX,
+  ASSISTANT_PROMPT_MAX_CHARS,
+  ASSISTANT_TURNS_PER_ACTION_MAX,
   ASSISTANT_TURNS_PER_SESSION_MAX,
   type Region,
 } from "./config";
@@ -37,6 +40,7 @@ import {
   INTENT_EXPECT,
   INTENT_MIX,
   IN_SCOPE_INTENTS,
+  NO_TOOLS,
   NO_WRITES,
   OPENER_TEMPLATES,
   SHAPES,
@@ -71,7 +75,7 @@ import {
   type TypingStep,
   type Verdict,
 } from "./assistant-prompts";
-import { DEFAULT_CATEGORY_SEEDS } from "./seed-data";
+import { DEFAULT_CATEGORY_SEEDS, PERSONA_PASSWORD } from "./seed-data";
 
 let checksPassed = 0;
 
@@ -976,6 +980,97 @@ check("new visitors never get cells an empty workspace cannot fill; the fallback
     }
   }
   assert.ok(validFallbacks > 0);
+});
+
+check("follow-ups keep validity labels and expectations honest, and every follow-up kind is reachable", () => {
+  const kinds = new Set<string>();
+  for (const persona of PERSONAS) {
+    const data = assistantData(persona);
+    for (let i = 0; i < 60; i++) {
+      const planner = plannerFor(persona, `follow:${persona.id}:${i}`);
+      while (planner.turnsLeft() > 0) {
+        for (const thread of planner.nextAction().threads) {
+          thread.turns.forEach((turn, index) => {
+            assert.strictEqual(isScopeValid(turn.scope, data), turn.scopeLabel === "valid", `${turn.kind} "${turn.text}" is ${turn.scopeLabel}`);
+            if (turn.scopeLabel !== "valid") assert.deepStrictEqual(turn.expect, NO_WRITES);
+            if (index === 0) return;
+            kinds.add(turn.kind);
+            const parent = thread.turns[index - 1];
+            if (turn.kind === "followup:thanks") assert.deepStrictEqual(turn.expect, NO_TOOLS);
+            if (turn.kind === "followup:answerClarify") assert.ok(["missingAmount", "missingWhat"].includes(parent.shape), parent.shape);
+            if (turn.kind === "followup:pickCandidate") assert.strictEqual(parent.shape, "ambiguousTarget");
+            if (turn.kind === "followup:amountFix") assert.strictEqual(parent.intent, "addTransaction");
+            if (turn.scopeLabel === "valid" && turn.kind === "followup:refine") assert.deepStrictEqual(turn.expect.must, ["findTransactions"]);
+          });
+        }
+      }
+    }
+  }
+  assert.deepStrictEqual([...kinds].sort(), FOLLOWUP_KINDS.map((kind) => `followup:${kind}`).sort());
+});
+
+check("register, typo and slot rules hold per archetype, and style is stable per persona (AC9)", () => {
+  for (const archetype of ARCHETYPE_LIST) {
+    const members = personasOf(archetype);
+    const turns: Turn[] = [];
+    for (let i = 0; turns.length < 2000; i++) turns.push(...sessionTurns(plannerFor(members[i % members.length], `style:${archetype}:${i}`)));
+    const registered = turns.filter((t) => t.register !== "any");
+    const share = (register: Register): number => registered.filter((t) => t.register === register).length / registered.length;
+    const kept = turns.filter((t) => t.typo === "kept").length / turns.length;
+    if (archetype === "power") {
+      assert.ok(share("terse") >= 0.6, `power terse share ${share("terse")}`);
+      assert.ok(kept <= 0.04, `power kept-typo rate ${kept}`);
+    }
+    if (archetype === "casual") {
+      assert.ok(share("chatty") >= 0.5, `casual chatty share ${share("chatty")}`);
+      assert.ok(kept >= 0.1, `casual kept-typo rate ${kept}`);
+    }
+    for (const turn of turns) {
+      for (const value of turn.slotValues) {
+        assert.ok(turn.text.toLowerCase().includes(value.toLowerCase()), `typo inside slot "${value}" in "${turn.text}"`);
+      }
+      assert.strictEqual(typedResult(turn.typing), turn.text, `keystrokes do not replay "${turn.text}"`);
+      const { min, max } = ARCHETYPE_STYLE[archetype].charDelayMs;
+      assert.ok(turn.charDelayMs >= min && turn.charDelayMs <= max, `${archetype} delay ${turn.charDelayMs}`);
+    }
+  }
+  for (const persona of PERSONAS) {
+    const a = plannerFor(persona, "s:1", { now: new Date("2026-09-04T00:00:00.000Z") }).style;
+    const b = plannerFor(persona, "s:2", { now: new Date("2026-09-20T00:00:00.000Z") }).style;
+    assert.deepStrictEqual(a, b, `${persona.username}'s style changed between dates`);
+  }
+});
+
+check("planner caps hold over 10,000 sessions and generated text is safe to type and log (AC11, AC12, RF1)", () => {
+  const banned = [/@/, /sk-/i, /http/i, /www\./i, /\d{12,}/, /["\n\r{}[\]]/];
+  const identities = PERSONAS.flatMap((p) => [...p.displayName.split(" "), p.username]).map((word) => word.toLowerCase());
+  let turnsChecked = 0;
+  for (let s = 0; s < 10000; s++) {
+    const persona = PERSONAS[s % PERSONAS.length];
+    const planner = plannerFor(persona, `caps:${s}`);
+    let session = 0;
+    for (let a = 0; a < 8; a++) {
+      const plan = planner.nextAction();
+      const actionTurns = plan.threads.reduce((sum, thread) => sum + thread.turns.length, 0);
+      assert.ok(actionTurns <= ASSISTANT_TURNS_PER_ACTION_MAX, `action with ${actionTurns} turns`);
+      for (const thread of plan.threads) {
+        assert.ok(thread.turns.length - 1 <= ASSISTANT_FOLLOWUPS_MAX, `thread with ${thread.turns.length - 1} follow-ups`);
+        assert.strictEqual(thread.turns[0].kind, "opener");
+        if (turnsChecked >= 10000) continue;
+        for (const turn of thread.turns) {
+          turnsChecked++;
+          assert.ok(turn.text.length > 0 && turn.text.length <= ASSISTANT_PROMPT_MAX_CHARS, `bad length: "${turn.text}"`);
+          for (const pattern of banned) assert.ok(!pattern.test(turn.text), `"${turn.text}" matches ${pattern}`);
+          assert.ok(!turn.text.includes(PERSONA_PASSWORD));
+          const words = new Set(turn.text.toLowerCase().split(/[^a-z0-9_]+/));
+          for (const identity of identities) assert.ok(!words.has(identity), `"${turn.text}" names "${identity}"`);
+        }
+      }
+      session += actionTurns;
+    }
+    assert.ok(session <= ASSISTANT_TURNS_PER_SESSION_MAX, `session with ${session} turns`);
+  }
+  assert.strictEqual(turnsChecked, 10000);
 });
 
 // --- Summary -----------------------------------------------------------------

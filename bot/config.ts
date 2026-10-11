@@ -357,6 +357,8 @@ export const ASSISTANT_FOCUS_SHARE = 0.15;
 export const ASSISTANT_SECOND_THREAD_RATE = 0.25;
 /** Chance New chat is clicked before a thread when the log already holds messages. */
 export const ASSISTANT_NEW_CHAT_RATE = 0.6;
+/** Follow-up turns allowed after one opener. */
+export const ASSISTANT_FOLLOWUPS_MAX = 2;
 /** Turn caps per askAssistant and per session. */
 export const ASSISTANT_TURNS_PER_ACTION_MAX = 4;
 export const ASSISTANT_TURNS_PER_SESSION_MAX = 6;
