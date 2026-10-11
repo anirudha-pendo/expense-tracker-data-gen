@@ -27,20 +27,24 @@ import {
 import { planWorkspaceRename } from "./actions";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
+  ARCHETYPE_STYLE,
   CELLS,
   FOLLOWUP_KINDS,
   FOLLOWUP_TEMPLATES,
   INTENTS,
   INTENT_EXPECT,
+  INTENT_MIX,
   IN_SCOPE_INTENTS,
   OPENER_TEMPLATES,
   SHAPES,
+  applyStyle,
   drawPeriod,
   invalidPeriod,
   isScopeValid,
   newVisitorPromptData,
   promptDataFromSeed,
   renderTemplate,
+  styleProfile,
   templateSlots,
   verdict,
   type Expect,
@@ -49,7 +53,11 @@ import {
   type Register,
   type Scope,
   type SlotName,
+  type SlotValues,
+  type StyleKnobs,
+  type StyleProfile,
   type Template,
+  type TypingStep,
   type Verdict,
 } from "./assistant-prompts";
 import { DEFAULT_CATEGORY_SEEDS } from "./seed-data";
@@ -663,6 +671,97 @@ check("periods stay inside the persona's history on month and year boundaries; i
       }
     }
   }
+});
+
+const ARCHETYPE_LIST: readonly Archetype[] = ["power", "regular", "casual", "explorer", "churning"];
+
+/** One value for every slot, so any template renders. Values carry capitals so the lowercase habit is visible. */
+const ALL_SLOT_VALUES: SlotValues = {
+  category: "Food & Dining",
+  newCategory: "Transport",
+  period: "last month",
+  amount: "12.50",
+  newAmount: "15",
+  description: "coffee",
+  date: "on Sep 2",
+  newDate: "Sep 1",
+  text: "uber",
+  range: "over 40",
+  limit: "5",
+  order: "biggest",
+  target: "the Coffee on Sep 3",
+  ambiguous: "coffee",
+  candidate: "Sep 3",
+};
+
+function typedResult(typing: readonly TypingStep[]): string {
+  let text = "";
+  for (const step of typing) text = step.kind === "type" ? text + step.text : text.slice(0, -1);
+  return text;
+}
+
+check("every archetype's intent mix sums to 100 with the spec's in-scope share", () => {
+  const inScope: Record<Archetype, number> = { power: 84, regular: 73, casual: 45, explorer: 44, churning: 30 };
+  for (const archetype of ARCHETYPE_LIST) {
+    const mix = INTENT_MIX[archetype];
+    assert.strictEqual(INTENTS.reduce((sum, intent) => sum + mix[intent], 0), 100, archetype);
+    assert.strictEqual(IN_SCOPE_INTENTS.reduce((sum, intent) => sum + mix[intent], 0), inScope[archetype], archetype);
+    const registers = ARCHETYPE_STYLE[archetype].registers;
+    assert.strictEqual(registers.terse + registers.plain + registers.chatty, 100, archetype);
+  }
+});
+
+check("a style profile is a pure function of its key, and doubles the preferred register", () => {
+  for (const archetype of ARCHETYPE_LIST) {
+    for (let i = 0; i < 20; i++) {
+      const a = styleProfile(archetype, `persona-${i}`);
+      assert.deepStrictEqual(styleProfile(archetype, `persona-${i}`), a);
+      assert.ok(ARCHETYPE_STYLE[archetype].registers[a.preferred] > 0, `${archetype} preferred a zero-weight register`);
+      assert.strictEqual(a.registerWeights[a.preferred], ARCHETYPE_STYLE[archetype].registers[a.preferred] * 2);
+    }
+  }
+});
+
+check("styled text replays exactly from its keystrokes, and a typo never touches a slot or a short word (RF3)", () => {
+  const always: StyleKnobs[] = [
+    { ...ARCHETYPE_STYLE.casual, keptTypo: 1, correctedTypo: 0 },
+    { ...ARCHETYPE_STYLE.casual, keptTypo: 0, correctedTypo: 1 },
+    { ...ARCHETYPE_STYLE.power, keptTypo: 0, correctedTypo: 0 },
+  ];
+  const styles: StyleProfile[] = [
+    { lowercase: true, noEndPunctuation: true, preferred: "plain", registerWeights: { terse: 1, plain: 1, chatty: 1 } },
+    { lowercase: false, noEndPunctuation: false, preferred: "plain", registerWeights: { terse: 1, plain: 1, chatty: 1 } },
+  ];
+  const texts = [...OPENER_TEMPLATES, ...FOLLOWUP_TEMPLATES].map((t) => t.text);
+  let corrected = 0;
+  let kept = 0;
+  for (const knobs of always) {
+    for (const style of styles) {
+      texts.forEach((template, i) => {
+        const rng = makeRng(`style:${i}`);
+        const parts = renderTemplate(template, ALL_SLOT_VALUES, rng);
+        const styled = applyStyle(parts, style, knobs, rng);
+        assert.strictEqual(typedResult(styled.typing), styled.text, `keystrokes do not replay "${styled.text}"`);
+        for (const part of parts.filter((p) => p.slot)) {
+          const value = style.lowercase ? part.text.toLowerCase() : part.text;
+          assert.ok(styled.text.includes(value), `typo inside slot "${value}" in "${styled.text}"`);
+        }
+        const hasLongWord = parts.some((p) => !p.slot && /[A-Za-z]{4,}/.test(p.text));
+        if (!hasLongWord) assert.strictEqual(styled.typo, "none", `typo without a 4-letter literal word in "${styled.text}"`);
+        if (styled.typo === "corrected") {
+          corrected++;
+          assert.strictEqual(styled.typing.length, 3);
+          const [wrong, backspace, rest] = styled.typing;
+          assert.strictEqual(backspace.kind, "backspace");
+          assert.ok(wrong.kind === "type" && rest.kind === "type" && wrong.text.length > 0 && rest.text.length > 0);
+          assert.notStrictEqual(wrong.text.slice(-1), rest.text[0], "the corrected letter must differ from the typed one");
+        }
+        if (styled.typo === "kept") kept++;
+        if (style.lowercase) assert.strictEqual(styled.text, styled.text.toLowerCase());
+      });
+    }
+  }
+  assert.ok(corrected > 100 && kept > 100, `typo paths not exercised: corrected ${corrected}, kept ${kept}`);
 });
 
 // --- Summary -----------------------------------------------------------------

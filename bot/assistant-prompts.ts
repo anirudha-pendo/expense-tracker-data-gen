@@ -1,7 +1,7 @@
 // Pure: the same inputs always give the same turns, so a run's prompts can be replayed exactly.
 
-import type { Rng } from "./config";
-import type { SeedData } from "./personas";
+import { makeRng, type Rng } from "./config";
+import type { Archetype, SeedData } from "./personas";
 import { CUSTOM_CATEGORY_SEEDS, DEFAULT_CATEGORY_SEEDS, type CategorySeed } from "./seed-data";
 
 export const INTENTS = [
@@ -817,4 +817,137 @@ export function isScopeValid(scope: Scope, data: PromptData): boolean {
       data.transactions.filter((tx) => sameName(tx.description, target.description) && tx.date === target.date).length === 1) &&
     (ambiguous === undefined || data.transactions.filter((tx) => sameName(tx.description, ambiguous)).length >= 2)
   );
+}
+
+/** Opener intent mix per archetype, in percent; each row sums to 100. */
+export const INTENT_MIX: Record<Archetype, Record<Intent, number>> = {
+  power: { spendSummary: 22, incomeSummary: 6, findTransactions: 14, topTransactions: 12, addTransaction: 18, editTransaction: 8, deleteTransaction: 4, vague: 3, clarify: 5, adviceRefusal: 2, unsafeRefusal: 1, offTopic: 2, meta: 3 },
+  regular: { spendSummary: 20, incomeSummary: 5, findTransactions: 12, topTransactions: 8, addTransaction: 20, editTransaction: 5, deleteTransaction: 3, vague: 8, clarify: 8, adviceRefusal: 4, unsafeRefusal: 1, offTopic: 3, meta: 3 },
+  casual: { spendSummary: 14, incomeSummary: 2, findTransactions: 6, topTransactions: 4, addTransaction: 16, editTransaction: 2, deleteTransaction: 1, vague: 18, clarify: 12, adviceRefusal: 5, unsafeRefusal: 2, offTopic: 10, meta: 8 },
+  explorer: { spendSummary: 10, incomeSummary: 3, findTransactions: 8, topTransactions: 6, addTransaction: 10, editTransaction: 4, deleteTransaction: 3, vague: 10, clarify: 10, adviceRefusal: 8, unsafeRefusal: 6, offTopic: 12, meta: 10 },
+  churning: { spendSummary: 15, incomeSummary: 0, findTransactions: 5, topTransactions: 0, addTransaction: 10, editTransaction: 0, deleteTransaction: 0, vague: 25, clarify: 10, adviceRefusal: 5, unsafeRefusal: 0, offTopic: 20, meta: 10 },
+};
+
+export interface StyleKnobs {
+  registers: Record<Register, number>;
+  lowercase: number;
+  noEndPunctuation: number;
+  keptTypo: number;
+  correctedTypo: number;
+  charDelayMs: { min: number; max: number };
+  sendClick: number;
+  followUp: number;
+  invalidScope: number;
+  amountDecimals: number;
+}
+
+export const ARCHETYPE_STYLE: Record<Archetype, StyleKnobs> = {
+  power: { registers: { terse: 70, plain: 30, chatty: 0 }, lowercase: 0.5, noEndPunctuation: 0.7, keptTypo: 0.02, correctedTypo: 0, charDelayMs: { min: 60, max: 100 }, sendClick: 0.05, followUp: 0.5, invalidScope: 0.03, amountDecimals: 0.5 },
+  regular: { registers: { terse: 20, plain: 65, chatty: 15 }, lowercase: 0.25, noEndPunctuation: 0.35, keptTypo: 0.05, correctedTypo: 0, charDelayMs: { min: 90, max: 150 }, sendClick: 0.2, followUp: 0.4, invalidScope: 0.06, amountDecimals: 0.2 },
+  casual: { registers: { terse: 5, plain: 35, chatty: 60 }, lowercase: 0.55, noEndPunctuation: 0.5, keptTypo: 0.15, correctedTypo: 0.15, charDelayMs: { min: 130, max: 220 }, sendClick: 0.4, followUp: 0.3, invalidScope: 0.1, amountDecimals: 0.2 },
+  explorer: { registers: { terse: 10, plain: 40, chatty: 50 }, lowercase: 0.4, noEndPunctuation: 0.45, keptTypo: 0.1, correctedTypo: 0.1, charDelayMs: { min: 100, max: 180 }, sendClick: 0.3, followUp: 0.45, invalidScope: 0.15, amountDecimals: 0.2 },
+  churning: { registers: { terse: 10, plain: 50, chatty: 40 }, lowercase: 0.5, noEndPunctuation: 0.5, keptTypo: 0.15, correctedTypo: 0, charDelayMs: { min: 130, max: 220 }, sendClick: 0.4, followUp: 0.1, invalidScope: 0.1, amountDecimals: 0.2 },
+};
+
+export interface StyleProfile {
+  lowercase: boolean;
+  noEndPunctuation: boolean;
+  preferred: Register;
+  registerWeights: Record<Register, number>;
+}
+
+/** Drawn once per key (a returning persona's id, a new visitor's session seed), so habits survive across days. */
+export function styleProfile(archetype: Archetype, key: string): StyleProfile {
+  const rng = makeRng(`assistant-style:${key}`);
+  const knobs = ARCHETYPE_STYLE[archetype];
+  const lowercase = rng.chance(knobs.lowercase);
+  const noEndPunctuation = rng.chance(knobs.noEndPunctuation);
+  const preferred = rng.weighted(
+    REGISTERS.filter((register) => knobs.registers[register] > 0),
+    (register) => knobs.registers[register],
+  );
+  const registerWeights = { ...knobs.registers, [preferred]: knobs.registers[preferred] * 2 };
+  return { lowercase, noEndPunctuation, preferred, registerWeights };
+}
+
+export type TypingStep = { kind: "type"; text: string } | { kind: "backspace" };
+export type Typo = "none" | "kept" | "corrected";
+
+const QWERTY_NEIGHBOURS: Record<string, string> = {
+  a: "qwsz", b: "vghn", c: "xdfv", d: "serfcx", e: "wsdr", f: "drtgvc", g: "ftyhbv", h: "gyujnb", i: "ujko",
+  j: "huikmn", k: "jiolm", l: "kop", m: "njk", n: "bhjm", o: "iklp", p: "ol", q: "wa", r: "edft", s: "awedxz",
+  t: "rfgy", u: "yhji", v: "cfgb", w: "qase", x: "zsdc", y: "tghu", z: "asx",
+};
+
+function neighbourOf(letter: string, rng: Rng): string {
+  const lower = letter.toLowerCase();
+  const options = QWERTY_NEIGHBOURS[lower];
+  if (options === undefined) throw new Error(`no keyboard neighbours for "${letter}"`);
+  const wrong = rng.pick([...options]);
+  return letter === lower ? wrong : wrong.toUpperCase();
+}
+
+interface WordAt {
+  part: number;
+  start: number;
+  word: string;
+}
+
+function literalWords(parts: Part[]): WordAt[] {
+  return parts.flatMap((part, index) =>
+    part.slot ? [] : [...part.text.matchAll(/[A-Za-z]{4,}/g)].map((m) => ({ part: index, start: m.index, word: m[0] })),
+  );
+}
+
+function keepTypo(word: string, rng: Rng): string {
+  const swaps = [...word].flatMap((letter, i) => (i < word.length - 1 && letter !== word[i + 1] ? [i] : []));
+  const kind = rng.pick(swaps.length > 0 ? ["swap", "drop", "double"] : ["drop", "double"]);
+  if (kind === "swap") {
+    const i = rng.pick(swaps);
+    return word.slice(0, i) + word[i + 1] + word[i] + word.slice(i + 2);
+  }
+  if (kind === "drop") {
+    const i = rng.int(1, word.length - 1);
+    return word.slice(0, i) + word.slice(i + 1);
+  }
+  const i = rng.int(0, word.length - 1);
+  return word.slice(0, i + 1) + word[i] + word.slice(i + 1);
+}
+
+export interface Styled {
+  text: string;
+  typing: TypingStep[];
+  typo: Typo;
+}
+
+/** Applies the persona's habits; at most one typo, and only inside a literal word of 4+ letters. */
+export function applyStyle(rendered: Part[], style: StyleProfile, knobs: StyleKnobs, rng: Rng): Styled {
+  const parts = rendered.map((part) => ({ ...part, text: style.lowercase ? part.text.toLowerCase() : part.text }));
+  const last = parts[parts.length - 1];
+  if (style.noEndPunctuation && last !== undefined && !last.slot) last.text = last.text.replace(/[.?!]+$/, "");
+  const keptRoll = rng.chance(knobs.keptTypo);
+  const correctedRoll = rng.chance(knobs.correctedTypo);
+  const words = literalWords(parts);
+  if (keptRoll && words.length > 0) {
+    const at = rng.pick(words);
+    const part = parts[at.part];
+    part.text = part.text.slice(0, at.start) + keepTypo(at.word, rng) + part.text.slice(at.start + at.word.length);
+    const text = parts.map((p) => p.text).join("");
+    return { text, typing: [{ kind: "type", text }], typo: "kept" };
+  }
+  const text = parts.map((p) => p.text).join("");
+  if (correctedRoll && words.length > 0) {
+    const at = rng.pick(words);
+    const offset = parts.slice(0, at.part).reduce((sum, p) => sum + p.text.length, 0) + at.start + rng.int(1, at.word.length - 1);
+    return {
+      text,
+      typing: [
+        { kind: "type", text: text.slice(0, offset) + neighbourOf(text[offset], rng) },
+        { kind: "backspace" },
+        { kind: "type", text: text.slice(offset) },
+      ],
+      typo: "corrected",
+    };
+  }
+  return { text, typing: [{ kind: "type", text }], typo: "none" };
 }
