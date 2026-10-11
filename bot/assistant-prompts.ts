@@ -1,6 +1,8 @@
 // Pure: the same inputs always give the same turns, so a run's prompts can be replayed exactly.
 
 import type { Rng } from "./config";
+import type { SeedData } from "./personas";
+import { CUSTOM_CATEGORY_SEEDS, DEFAULT_CATEGORY_SEEDS, type CategorySeed } from "./seed-data";
 
 export const INTENTS = [
   "spendSummary",
@@ -567,4 +569,252 @@ export function renderTemplate(text: string, values: SlotValues, rng: Rng): Part
   }
   parts.push({ text: text.slice(cursor), slot: false });
   return parts.filter((part) => part.text.length > 0);
+}
+
+export interface PromptCategory {
+  name: string;
+  scope: "income" | "expense" | "both";
+  seed: CategorySeed;
+}
+
+export interface PromptTransaction {
+  description: string;
+  amount: number;
+  date: string;
+  categoryName: string;
+  type: "income" | "expense";
+}
+
+/** The persona's workspace as the prompts see it, pinned to the date it was seeded for. */
+export interface PromptData {
+  /** yyyy-mm-dd (UTC). */
+  today: string;
+  /** First day of the month holding the earliest transaction; today's month when there are none. */
+  historyStart: string;
+  categories: PromptCategory[];
+  transactions: PromptTransaction[];
+}
+
+const MS_PER_DAY = 86_400_000;
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const ALL_CATEGORY_SEEDS: readonly CategorySeed[] = [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS];
+
+function dayMs(iso: string): number {
+  return Date.parse(`${iso}T00:00:00.000Z`);
+}
+
+function isoDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export function addDays(iso: string, days: number): string {
+  return isoDay(dayMs(iso) + days * MS_PER_DAY);
+}
+
+function monthStart(iso: string, monthsBack: number): string {
+  const d = new Date(dayMs(iso));
+  return isoDay(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - monthsBack, 1));
+}
+
+function monthEnd(iso: string, monthsBack: number): string {
+  const d = new Date(dayMs(iso));
+  return isoDay(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - monthsBack + 1, 0));
+}
+
+function monthIndex(iso: string): number {
+  const d = new Date(dayMs(iso));
+  return d.getUTCFullYear() * 12 + d.getUTCMonth();
+}
+
+export function shortDate(iso: string): string {
+  const d = new Date(dayMs(iso));
+  return `${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+export function sameName(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+function seedFor(name: string): CategorySeed {
+  const seed = ALL_CATEGORY_SEEDS.find((candidate) => candidate.name === name);
+  if (seed === undefined) throw new Error(`no category seed is named "${name}"`);
+  return seed;
+}
+
+export function promptDataFromSeed(seed: SeedData, now: Date): PromptData {
+  const today = isoDay(now.getTime());
+  const nameById = new Map(seed.categories.map((category) => [category.id, category.name]));
+  const transactions = seed.transactions.map((tx): PromptTransaction => {
+    const categoryName = nameById.get(tx.categoryId);
+    if (categoryName === undefined) throw new Error(`transaction ${tx.id} has no category in its workspace`);
+    return { description: tx.description, amount: tx.amount, date: tx.date, categoryName, type: tx.type };
+  });
+  const earliest = transactions.reduce((min, tx) => (tx.date < min ? tx.date : min), today);
+  return {
+    today,
+    historyStart: monthStart(earliest, 0),
+    categories: seed.categories.map((category) => ({ name: category.name, scope: category.scope, seed: seedFor(category.name) })),
+    transactions,
+  };
+}
+
+/** A brand-new workspace holds the app's default categories and nothing else. */
+export function newVisitorPromptData(now: Date): PromptData {
+  const today = isoDay(now.getTime());
+  return {
+    today,
+    historyStart: monthStart(today, 0),
+    categories: DEFAULT_CATEGORY_SEEDS.map((seed) => ({ name: seed.name, scope: seed.scope, seed })),
+    transactions: [],
+  };
+}
+
+export const PERIOD_KINDS = ["thisMonth", "lastMonth", "namedMonth", "last30Days", "thisWeek", "today", "yesterday", "sinceMonth", "thisYear"] as const;
+export type PeriodKind = (typeof PERIOD_KINDS)[number];
+export type InvalidPeriodKind = "beforeHistory" | "nextMonth";
+
+export interface Period {
+  kind: PeriodKind | InvalidPeriodKind;
+  label: string;
+  start: string;
+  end: string;
+}
+
+// Spec: today/yesterday share 8.
+const PERIOD_WEIGHTS: Record<PeriodKind, number> = {
+  thisMonth: 30,
+  lastMonth: 20,
+  namedMonth: 12,
+  last30Days: 10,
+  thisWeek: 8,
+  today: 4,
+  yesterday: 4,
+  sinceMonth: 6,
+  thisYear: 6,
+};
+
+function monthsOfHistory(data: PromptData): number {
+  return monthIndex(data.today) - monthIndex(data.historyStart);
+}
+
+function periodEligible(kind: PeriodKind, data: PromptData): boolean {
+  if (kind === "yesterday") return addDays(data.today, -1) >= data.historyStart;
+  if (kind === "lastMonth") return monthsOfHistory(data) >= 1;
+  // Named months start two back: one back is already "last month".
+  if (kind === "namedMonth" || kind === "sinceMonth") return monthsOfHistory(data) >= 2;
+  return true;
+}
+
+export function buildPeriod(kind: PeriodKind, data: PromptData, rng: Rng): Period {
+  const { today } = data;
+  switch (kind) {
+    case "thisMonth":
+      return { kind, label: "this month", start: monthStart(today, 0), end: today };
+    case "lastMonth":
+      return { kind, label: "last month", start: monthStart(today, 1), end: monthEnd(today, 1) };
+    case "namedMonth": {
+      const back = rng.int(2, monthsOfHistory(data));
+      const start = monthStart(today, back);
+      return { kind, label: `in ${MONTH_NAMES[new Date(dayMs(start)).getUTCMonth()]}`, start, end: monthEnd(today, back) };
+    }
+    case "last30Days":
+      return { kind, label: "in the last 30 days", start: addDays(today, -29), end: today };
+    case "thisWeek":
+      return { kind, label: "this week", start: addDays(today, -((new Date(dayMs(today)).getUTCDay() + 6) % 7)), end: today };
+    case "today":
+      return { kind, label: "today", start: today, end: today };
+    case "yesterday":
+      return { kind, label: "yesterday", start: addDays(today, -1), end: addDays(today, -1) };
+    case "sinceMonth": {
+      const back = rng.int(2, monthsOfHistory(data));
+      const start = monthStart(today, back);
+      return { kind, label: `since ${MONTH_NAMES[new Date(dayMs(start)).getUTCMonth()]}`, start, end: today };
+    }
+    case "thisYear":
+      return { kind, label: "this year", start: `${today.slice(0, 4)}-01-01`, end: today };
+  }
+}
+
+export function drawPeriod(data: PromptData, rng: Rng, exclude?: Period["kind"]): Period {
+  const kinds = PERIOD_KINDS.filter((kind) => kind !== exclude && periodEligible(kind, data));
+  return buildPeriod(rng.weighted(kinds, (kind) => PERIOD_WEIGHTS[kind]), data, rng);
+}
+
+export function invalidPeriod(data: PromptData, rng: Rng): Period {
+  if (rng.chance(0.5)) {
+    const year = Number(data.historyStart.slice(0, 4)) - rng.int(1, 4);
+    return { kind: "beforeHistory", label: `in ${year}`, start: `${year}-01-01`, end: `${year}-12-31` };
+  }
+  return { kind: "nextMonth", label: "next month", start: monthStart(data.today, -1), end: monthEnd(data.today, -1) };
+}
+
+function isPeriodValid(period: Period, data: PromptData): boolean {
+  return period.start <= period.end && period.end >= data.historyStart && period.start <= data.today;
+}
+
+export type InvalidKind = "category" | "period" | "target";
+export type ScopeLabel = "valid" | `invalid:${InvalidKind}`;
+export type Order = "biggest" | "smallest";
+export type AmountRange = { op: "over"; value: number } | { op: "under"; value: number } | { op: "between"; low: number; high: number };
+
+export interface TargetRef {
+  description: string;
+  date: string;
+}
+
+/** Every value a turn names, in the persona's own terms. */
+export interface Scope {
+  type: "expense" | "income";
+  category?: string;
+  newCategory?: string;
+  period?: Period;
+  amount?: number;
+  newAmount?: number;
+  description?: string;
+  date?: string;
+  newDate?: string;
+  text?: string;
+  range?: AmountRange;
+  limit?: number;
+  order?: Order;
+  target?: TargetRef;
+  ambiguous?: string;
+}
+
+export const TOP_LIMITS: readonly number[] = [3, 5, 10];
+
+function hasCategory(data: PromptData, name: string, type: "expense" | "income"): boolean {
+  return data.categories.some((category) => sameName(category.name, name) && (category.scope === type || category.scope === "both"));
+}
+
+function inRange(amount: number, range: AmountRange): boolean {
+  if (range.op === "over") return amount > range.value;
+  if (range.op === "under") return amount < range.value;
+  return amount >= range.low && amount <= range.high;
+}
+
+function positive(value: number | undefined): boolean {
+  return value === undefined || (Number.isFinite(value) && value > 0);
+}
+
+export function isScopeValid(scope: Scope, data: PromptData): boolean {
+  const { category, range, target, ambiguous, text, period } = scope;
+  return (
+    (category === undefined || hasCategory(data, category, scope.type)) &&
+    (scope.newCategory === undefined || hasCategory(data, scope.newCategory, "expense")) &&
+    (period === undefined || isPeriodValid(period, data)) &&
+    positive(scope.amount) &&
+    positive(scope.newAmount) &&
+    (scope.description === undefined || scope.description.trim().length > 0) &&
+    (scope.date === undefined || (scope.date <= data.today && scope.date >= addDays(data.today, -365))) &&
+    (scope.newDate === undefined || (scope.newDate <= data.today && scope.newDate !== target?.date)) &&
+    (text === undefined || (text.length > 0 && data.transactions.some((tx) => tx.description.toLowerCase().includes(text.toLowerCase())))) &&
+    (range === undefined ||
+      (category !== undefined && data.transactions.some((tx) => sameName(tx.categoryName, category) && inRange(tx.amount, range)))) &&
+    (scope.limit === undefined || TOP_LIMITS.includes(scope.limit)) &&
+    (target === undefined ||
+      data.transactions.filter((tx) => sameName(tx.description, target.description) && tx.date === target.date).length === 1) &&
+    (ambiguous === undefined || data.transactions.filter((tx) => sameName(tx.description, ambiguous)).length >= 2)
+  );
 }

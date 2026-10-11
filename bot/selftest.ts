@@ -35,15 +35,24 @@ import {
   IN_SCOPE_INTENTS,
   OPENER_TEMPLATES,
   SHAPES,
+  drawPeriod,
+  invalidPeriod,
+  isScopeValid,
+  newVisitorPromptData,
+  promptDataFromSeed,
   renderTemplate,
   templateSlots,
   verdict,
   type Expect,
+  type Period,
+  type PromptData,
   type Register,
+  type Scope,
   type SlotName,
   type Template,
   type Verdict,
 } from "./assistant-prompts";
+import { DEFAULT_CATEGORY_SEEDS } from "./seed-data";
 
 let checksPassed = 0;
 
@@ -560,6 +569,100 @@ check("renderTemplate resolves [a|b], keeps slot values in their own parts, and 
   assert.deepStrictEqual(renderTemplate("{amount}", { amount: "4.50" }, makeRng("render")), [{ text: "4.50", slot: true }]);
   assert.throws(() => renderTemplate("add {amount}", {}, makeRng("render")), /needs a value for \{amount\}/);
   assert.throws(() => templateSlots("add {money}"), /unknown slot \{money\}/);
+});
+
+const assistantDataCache = new Map<string, PromptData>();
+
+/** The prompt view of a persona's seed, cached because buildSeedData is the slow part of these checks. */
+function assistantData(persona: Persona, now: Date = TEST_NOW): PromptData {
+  const key = `${persona.id}|${now.toISOString()}`;
+  const cached = assistantDataCache.get(key);
+  if (cached !== undefined) return cached;
+  const data = promptDataFromSeed(buildSeedData(persona, now), now);
+  assistantDataCache.set(key, data);
+  return data;
+}
+
+check("promptDataFromSeed mirrors the seed: names, amounts, dates, and the month history starts in", () => {
+  const persona = PERSONAS[0];
+  const seed = buildSeedData(persona, TEST_NOW);
+  const data = assistantData(persona);
+  assert.strictEqual(data.today, "2026-09-04");
+  assert.deepStrictEqual(data.categories.map((c) => c.name), seed.categories.map((c) => c.name));
+  assert.strictEqual(data.transactions.length, seed.transactions.length);
+  const earliest = seed.transactions.map((t) => t.date).sort()[0];
+  assert.strictEqual(data.historyStart, `${earliest.slice(0, 7)}-01`);
+  const visitor = newVisitorPromptData(TEST_NOW);
+  assert.deepStrictEqual(visitor.categories.map((c) => c.name), DEFAULT_CATEGORY_SEEDS.map((c) => c.name));
+  assert.deepStrictEqual({ transactions: visitor.transactions.length, historyStart: visitor.historyStart }, { transactions: 0, historyStart: "2026-09-01" });
+});
+
+check("isScopeValid accepts the persona's own slots and rejects foreign ones", () => {
+  const data: PromptData = {
+    today: "2026-09-04",
+    historyStart: "2026-06-01",
+    categories: [
+      { name: "Food & Dining", scope: "expense", seed: DEFAULT_CATEGORY_SEEDS[0] },
+      { name: "Salary", scope: "income", seed: DEFAULT_CATEGORY_SEEDS[8] },
+    ],
+    transactions: [
+      { description: "Coffee", amount: 4.5, date: "2026-09-01", categoryName: "Food & Dining", type: "expense" },
+      { description: "Coffee", amount: 5, date: "2026-09-02", categoryName: "Food & Dining", type: "expense" },
+      { description: "Coffee", amount: 5, date: "2026-09-02", categoryName: "Food & Dining", type: "expense" },
+    ],
+  };
+  const july: Period = { kind: "namedMonth", label: "in July", start: "2026-07-01", end: "2026-07-31" };
+  const cases: [Scope, boolean][] = [
+    [{ type: "expense", category: "food & dining", period: july }, true],
+    [{ type: "expense", category: "Yachts" }, false],
+    [{ type: "income", category: "Food & Dining" }, false],
+    [{ type: "income", category: "salary" }, true],
+    [{ type: "expense", newCategory: "Salary" }, false],
+    [{ type: "expense", period: { kind: "beforeHistory", label: "in 2023", start: "2023-01-01", end: "2023-12-31" } }, false],
+    [{ type: "expense", period: { kind: "nextMonth", label: "next month", start: "2026-10-01", end: "2026-10-31" } }, false],
+    [{ type: "expense", target: { description: "coffee", date: "2026-09-01" } }, true],
+    [{ type: "expense", target: { description: "Coffee", date: "2026-09-02" } }, false],
+    [{ type: "expense", target: { description: "Coffee", date: "2026-08-15" } }, false],
+    [{ type: "expense", ambiguous: "coffee" }, true],
+    [{ type: "expense", ambiguous: "tea" }, false],
+    [{ type: "expense", text: "coff" }, true],
+    [{ type: "expense", text: "uber" }, false],
+    [{ type: "expense", text: "" }, false],
+    [{ type: "expense", category: "Food & Dining", range: { op: "over", value: 4 } }, true],
+    [{ type: "expense", category: "Food & Dining", range: { op: "over", value: 50 } }, false],
+    [{ type: "expense", category: "Food & Dining", range: { op: "between", low: 4, high: 4.5 } }, true],
+    [{ type: "expense", range: { op: "under", value: 50 } }, false],
+    [{ type: "expense", limit: 5 }, true],
+    [{ type: "expense", limit: 7 }, false],
+    [{ type: "expense", amount: 0 }, false],
+    [{ type: "expense", amount: Number.NaN }, false],
+    [{ type: "expense", newAmount: 12.5 }, true],
+    [{ type: "expense", description: " " }, false],
+    [{ type: "expense", date: "2026-09-05" }, false],
+    [{ type: "expense", date: "2025-09-03" }, false],
+    [{ type: "expense", newDate: "2026-09-01", target: { description: "Coffee", date: "2026-09-01" } }, false],
+  ];
+  for (const [scope, wanted] of cases) assert.strictEqual(isScopeValid(scope, data), wanted, JSON.stringify(scope));
+});
+
+check("periods stay inside the persona's history on month and year boundaries; invalid periods never validate", () => {
+  const boundaryDates = ["2027-01-01", "2026-03-01", "2026-03-31", "2026-12-31", "2026-09-04"].map((iso) => new Date(`${iso}T00:00:00.000Z`));
+  for (const now of boundaryDates) {
+    for (const data of [...PERSONAS.slice(0, 10).map((p) => assistantData(p, now)), newVisitorPromptData(now)]) {
+      const rng = makeRng(`periods:${data.today}`);
+      for (let i = 0; i < 300; i++) {
+        const period = drawPeriod(data, rng);
+        assert.ok(isScopeValid({ type: "expense", period }, data), `${period.label} (${period.start}..${period.end}) on ${data.today}`);
+        if (["lastMonth", "namedMonth", "sinceMonth"].includes(period.kind)) {
+          assert.ok(period.start >= data.historyStart, `${period.label} starts before history on ${data.today}`);
+        }
+        assert.ok(!isScopeValid({ type: "expense", period: invalidPeriod(data, rng) }, data));
+      }
+      if (data.transactions.length === 0 && data.today.endsWith("-01")) {
+        for (let i = 0; i < 300; i++) assert.ok(!["yesterday", "lastMonth", "namedMonth", "sinceMonth"].includes(drawPeriod(data, rng).kind));
+      }
+    }
+  }
 });
 
 // --- Summary -----------------------------------------------------------------
