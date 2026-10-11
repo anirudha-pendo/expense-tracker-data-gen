@@ -5,6 +5,9 @@
 // Run with `npm run selftest`.
 
 import assert from "node:assert";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   REGIONS,
   REGION_CURVE,
@@ -1176,6 +1179,97 @@ check("the run summary's pendo block counts ready sessions, mismatches, beacons 
     { reading: { status: "unchecked" }, beacons: 0 },
   ]);
   assert.deepStrictEqual(lines, ["", "pendo ready       2/4 session(s), 1 with an id mismatch", "pendo beacons     24 total, 2 session(s) with none"]);
+});
+
+// --- Pure usage ------------------------------------------------------------------
+
+const BOT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const FORBIDDEN_CALLS = [".route(", "dispatchEvent", "force: true", "fetch(", "request.newContext", "APIRequestContext", "pendo.track", "pendo.identify", "trackAgent", "updateOptions(", "pendo.initialize", "pendo.pageLoad", "pendo.clearSession"];
+const PAGE_SCRIPT_CALLS = ["evaluate(", "evaluateHandle(", "waitForFunction(", "addInitScript("];
+
+function occurrences(source: string, token: string): number {
+  return source.split(token).length - 1;
+}
+
+/** From `start` up to (not including) `end`, or to the end of the file. */
+function between(source: string, start: string, end: string): string {
+  const from = source.indexOf(start);
+  if (from < 0) return "";
+  const to = source.indexOf(end, from + start.length);
+  return source.slice(from, to < 0 ? source.length : to);
+}
+
+/** Where page scripts are allowed: seeding, the __name polyfill, and the read-only Pendo check. */
+function pageScriptRegion(file: string, source: string): string {
+  if (file === "seed.ts") return source;
+  if (file === "actions.ts") return between(source, "export async function preparePage(", "\n}\n");
+  if (file === "run.ts") return between(source, "async function readPendoState(", "\n}\n");
+  return "";
+}
+
+function fileText(files: ReadonlyMap<string, string>, name: string): string {
+  const text = files.get(name);
+  if (text === undefined) throw new Error(`${name} was not scanned`);
+  return text;
+}
+
+/** `files` maps a bot/*.ts name to its source; selftest.ts is left out because it holds these tokens as data. */
+function pureUsageViolations(files: ReadonlyMap<string, string>): string[] {
+  const violations: string[] = [];
+  for (const [file, source] of files) {
+    for (const token of FORBIDDEN_CALLS) if (source.includes(token)) violations.push(`"${file}" contains "${token}"`);
+    const region = pageScriptRegion(file, source);
+    for (const token of PAGE_SCRIPT_CALLS) {
+      if (occurrences(source, token) !== occurrences(region, token)) violations.push(`"${file}" runs "${token}" outside its allowed place`);
+    }
+  }
+  const prompts = fileText(files, "assistant-prompts.ts");
+  if (prompts.includes(".fill(")) violations.push('"assistant-prompts.ts" contains ".fill("');
+  if (prompts.includes('from "playwright"')) violations.push('"assistant-prompts.ts" imports playwright');
+  if (between(fileText(files, "actions.ts"), "// --- Assistant", "// --- Reading and leaving").includes(".fill(")) {
+    violations.push('"actions.ts" assistant section contains ".fill("');
+  }
+  return violations;
+}
+
+check("the pure-usage scanner catches each forbidden call and allows page scripts only in their three places (AC14)", () => {
+  const clean = new Map([
+    ["seed.ts", "await page.evaluate(async () => {});"],
+    ["actions.ts", "export async function preparePage(page: Page): Promise<void> {\n  await page.addInitScript(() => {});\n}\n// --- Assistant ---\nawait input.pressSequentially(text);\n// --- Reading and leaving ---\nawait input.fill(text);\n"],
+    ["run.ts", "async function readPendoState(page: Page): Promise<void> {\n  await page.waitForFunction(() => true);\n  await page.evaluate(() => 1);\n}\n"],
+    ["assistant-prompts.ts", "export const x = 1;"],
+  ]);
+  assert.deepStrictEqual(pureUsageViolations(clean), []);
+  const dirty = (file: string, extra: string): Map<string, string> => new Map([...clean, [file, `${fileText(clean, file)}\n${extra}`]]);
+  const cases: [string, string, string][] = [
+    ["actions.ts", "await page.route('**/api/chat', () => {});", '"actions.ts" contains ".route("'],
+    ["actions.ts", "await button.dispatchEvent('click');", '"actions.ts" contains "dispatchEvent"'],
+    ["actions.ts", "await button.click({ force: true });", '"actions.ts" contains "force: true"'],
+    ["run.ts", "await fetch('/api/chat');", '"run.ts" contains "fetch("'],
+    ["run.ts", "await request.newContext();", '"run.ts" contains "request.newContext"'],
+    ["run.ts", "await page.evaluate(() => pendo.track('x'));", '"run.ts" contains "pendo.track"'],
+    ["actions.ts", "await page.evaluate(() => 1);", '"actions.ts" runs "evaluate(" outside its allowed place'],
+    ["run.ts", "await page.waitForFunction(() => true);", '"run.ts" runs "waitForFunction(" outside its allowed place'],
+    ["assistant-prompts.ts", "input.fill(text);", '"assistant-prompts.ts" contains ".fill("'],
+    ["assistant-prompts.ts", 'import type { Page } from "playwright";', '"assistant-prompts.ts" imports playwright'],
+  ];
+  for (const [file, extra, wanted] of cases) assert.ok(pureUsageViolations(dirty(file, extra)).includes(wanted), `${wanted} not reported`);
+  const filledAssistant = new Map([...clean, ["actions.ts", fileText(clean, "actions.ts").replace("pressSequentially", "fill")]]);
+  assert.ok(pureUsageViolations(filledAssistant).includes('"actions.ts" assistant section contains ".fill("'));
+});
+
+check("the bot itself passes the pure-usage scan (AC14)", () => {
+  const files = new Map(
+    readdirSync(BOT_DIR)
+      .filter((name) => name.endsWith(".ts") && name !== "selftest.ts")
+      .map((name): [string, string] => [name, readFileSync(path.join(BOT_DIR, name), "utf8")]),
+  );
+  assert.deepStrictEqual(pureUsageViolations(files), []);
+  assert.ok(pageScriptRegion("run.ts", fileText(files, "run.ts")).includes("waitForFunction("), "readPendoState lost its page script, so the region check proves nothing");
+  assert.ok(
+    between(fileText(files, "actions.ts"), "// --- Assistant", "// --- Reading and leaving").includes("pressSequentially("),
+    "the actions.ts assistant section moved, so the .fill( check proves nothing",
+  );
 });
 
 // --- Summary -----------------------------------------------------------------
