@@ -50,6 +50,8 @@ import {
   drawCell,
   drawPeriod,
   focusCell,
+  formatMatchRate,
+  formatTurnLine,
   invalidPeriod,
   isScopeValid,
   newVisitorPromptData,
@@ -57,6 +59,7 @@ import {
   renderTemplate,
   searchText,
   styleProfile,
+  summarizeAssistant,
   templateSlots,
   verdict,
   type AssistantPlanner,
@@ -72,6 +75,7 @@ import {
   type StyleProfile,
   type Template,
   type Turn,
+  type TurnRecord,
   type TypingStep,
   type Verdict,
 } from "./assistant-prompts";
@@ -1071,6 +1075,46 @@ check("planner caps hold over 10,000 sessions and generated text is safe to type
     assert.ok(session <= ASSISTANT_TURNS_PER_SESSION_MAX, `session with ${session} turns`);
   }
   assert.strictEqual(turnsChecked, 10000);
+});
+
+check("the turn log line has the exact req 20 shape", () => {
+  const turn = firstOpener(plannerFor(PERSONAS[0], "line:1"));
+  const line = formatTurnLine(1, 3, turn, ["getSpendingSummary", "findTransactions"], "match");
+  assert.match(
+    line,
+    /^askAssistant: turn 1\/3 intent=\w+ shape=\w+ scope=(valid|invalid:\w+) period=[\w-]+ kind=(opener|followup:\w+) expect=[\w|]+ got=\[getSpendingSummary,findTransactions\] verdict=match text=".+"$/,
+  );
+  assert.ok(line.endsWith(`text="${turn.text}"`));
+  const anyOf = formatTurnLine(2, 2, { ...turn, expect: { must: ["addTransaction", "updateTransaction"], forbid: [] } }, [], "miss");
+  assert.ok(anyOf.includes(" expect=addTransaction|updateTransaction got=[] verdict=miss "), anyOf);
+  assert.ok(formatTurnLine(1, 1, { ...turn, expect: NO_TOOLS }, [], "match").includes(" expect=none "));
+});
+
+check("summarizeAssistant counts in-scope matches over valid, answered turns only", () => {
+  const records: TurnRecord[] = [
+    { intent: "spendSummary", scopeLabel: "valid", verdict: "match" },
+    { intent: "spendSummary", scopeLabel: "valid", verdict: "miss" },
+    { intent: "spendSummary", scopeLabel: "invalid:period", verdict: "match" },
+    { intent: "addTransaction", scopeLabel: "valid", verdict: "unavailable" },
+    { intent: "offTopic", scopeLabel: "valid", verdict: "overreach" },
+  ];
+  const summary = summarizeAssistant(records, 2);
+  assert.deepStrictEqual(
+    { turns: summary.turns, unavailable: summary.unavailable, capSkips: summary.capSkips, judged: summary.inScopeJudged, match: summary.inScopeMatch },
+    { turns: 5, unavailable: 1, capSkips: 2, judged: 2, match: 1 },
+  );
+  assert.deepStrictEqual(summary.rows.map((r) => r.intent), ["spendSummary", "addTransaction", "offTopic"]);
+  assert.deepStrictEqual(summary.rows[0], { intent: "spendSummary", turns: 3, match: 2, miss: 1, overreach: 0, unavailable: 0 });
+  const empty = summarizeAssistant([], 0);
+  assert.deepStrictEqual({ turns: empty.turns, rows: empty.rows.length }, { turns: 0, rows: 0 });
+});
+
+check("the match rate never prints NaN (RF4)", () => {
+  assert.strictEqual(formatMatchRate(0, 0), "0/0 (n/a)");
+  assert.strictEqual(formatMatchRate(18, 24), "18/24 (75%)");
+  assert.strictEqual(formatMatchRate(2, 3), "2/3 (67%)");
+  const allUnavailable = summarizeAssistant([{ intent: "spendSummary", scopeLabel: "valid", verdict: "unavailable" }], 0);
+  assert.strictEqual(formatMatchRate(allUnavailable.inScopeMatch, allUnavailable.inScopeJudged), "0/0 (n/a)");
 });
 
 // --- Summary -----------------------------------------------------------------

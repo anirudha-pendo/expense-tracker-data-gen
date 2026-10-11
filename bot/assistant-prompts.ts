@@ -1465,3 +1465,60 @@ export function createAssistantPlanner(input: PlannerInput): AssistantPlanner {
     },
   };
 }
+
+export function formatTurnLine(index: number, total: number, turn: Turn, tools: readonly string[], result: Verdict): string {
+  const expect = turn.expect.must.length === 0 ? "none" : turn.expect.must.join("|");
+  return (
+    `askAssistant: turn ${index}/${total} intent=${turn.intent} shape=${turn.shape} scope=${turn.scopeLabel} ` +
+    `period=${turn.period} kind=${turn.kind} expect=${expect} got=[${tools.join(",")}] verdict=${result} text="${turn.text}"`
+  );
+}
+
+export interface TurnRecord {
+  intent: Intent;
+  scopeLabel: ScopeLabel;
+  verdict: Verdict;
+}
+
+export interface IntentRow {
+  intent: Intent;
+  turns: number;
+  match: number;
+  miss: number;
+  overreach: number;
+  unavailable: number;
+}
+
+export interface AssistantSummary {
+  turns: number;
+  unavailable: number;
+  capSkips: number;
+  /** In-scope intents with a valid scope that got an answer. */
+  inScopeJudged: number;
+  inScopeMatch: number;
+  /** Intents with at least one turn, in INTENTS order. */
+  rows: IntentRow[];
+}
+
+export function summarizeAssistant(records: readonly TurnRecord[], capSkips: number): AssistantSummary {
+  const judged = records.filter((r) => IN_SCOPE_INTENTS.includes(r.intent) && r.scopeLabel === "valid" && r.verdict !== "unavailable");
+  const rows = INTENTS.map((intent): IntentRow => {
+    const mine = records.filter((r) => r.intent === intent);
+    const count = (v: Verdict): number => mine.filter((r) => r.verdict === v).length;
+    return { intent, turns: mine.length, match: count("match"), miss: count("miss"), overreach: count("overreach"), unavailable: count("unavailable") };
+  }).filter((row) => row.turns > 0);
+  return {
+    turns: records.length,
+    unavailable: records.filter((r) => r.verdict === "unavailable").length,
+    capSkips,
+    inScopeJudged: judged.length,
+    inScopeMatch: judged.filter((r) => r.verdict === "match").length,
+    rows,
+  };
+}
+
+/** "18/24 (75%)", or "0/0 (n/a)" so an all-unavailable run never prints NaN. */
+export function formatMatchRate(match: number, judged: number): string {
+  if (judged === 0) return "0/0 (n/a)";
+  return `${match}/${judged} (${Math.round((match / judged) * 100)}%)`;
+}
