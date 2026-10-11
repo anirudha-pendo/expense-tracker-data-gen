@@ -1,9 +1,11 @@
 import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { Category } from "@/types";
+import { trackAssistantEvent } from "@/lib/analytics";
 import { localIsoDate } from "@/lib/dates";
 import { parseAssistantError } from "../contract/errors";
 import { ASSISTANT_LIMITS } from "../contract/limits";
+import { ASSISTANT_MODEL_ID } from "../contract/model";
 import type { CancelReason } from "../contract/types";
 import { applyTransactionProposal, StaleWriteError } from "../executors/transactions";
 import {
@@ -187,6 +189,19 @@ export class AssistantController {
         },
       }),
       onError: (error) => this.reportError(error),
+      onFinish: ({ message, isError, isAbort, isDisconnect }) => {
+        if (isError || isAbort || isDisconnect || message.role !== "assistant") return;
+        const content = message.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
+        const toolsUsed = [...new Set(message.parts.flatMap((p) => (p.type.startsWith("tool-") ? [p.type.slice(5)] : [])))];
+        if (content === "" && toolsUsed.length === 0) return;
+        trackAssistantEvent("agent_response", {
+          conversationId: chat.id,
+          messageId: message.id,
+          content,
+          modelUsed: ASSISTANT_MODEL_ID,
+          toolsUsed,
+        });
+      },
       onToolCall: ({ toolCall }) => handleAssistantToolCall(chat, toolCall, this.toolDepsFor(chat)),
       sendAutomaticallyWhen: ({ messages }) => this.shouldAutoSend(chat, messages),
     });
@@ -256,6 +271,12 @@ export class AssistantController {
     const chat = this.snapshot.chat;
     await this.supersedePending();
     if (chat !== this.snapshot.chat) return;
+    trackAssistantEvent("prompt", {
+      conversationId: chat.id,
+      messageId: `prompt-${Date.now()}`,
+      content: text,
+      modelUsed: ASSISTANT_MODEL_ID,
+    });
     await chat.sendMessage({ text });
   }
 
