@@ -844,12 +844,6 @@ function accountEarliestDate(persona: Persona, now: Date): Date {
   return dateFromYm(earliestYm, 1, 0, 0);
 }
 
-/** The category seeds behind a returning persona's workspace, so generated text can name the persona's own categories. */
-export function personaCategorySeeds(persona: Persona): CategorySeed[] {
-  const names = new Set(buildSeedData(persona, new Date()).categories.map((category) => category.name));
-  return [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS].filter((seed) => names.has(seed.name));
-}
-
 /**
  * Builds a persona's full workspace backstory: user, workspace, categories,
  * historical transactions, budgets and goals. Every id and random choice is

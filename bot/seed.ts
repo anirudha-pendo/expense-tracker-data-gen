@@ -15,7 +15,7 @@
 
 import type { Page } from "playwright";
 import { APP_URL, SEED_LANDMARK_TIMEOUT_MS } from "./config";
-import { buildSeedData, type Persona, type SeedData } from "./personas";
+import type { Persona, SeedData } from "./personas";
 
 // Mirrors src/lib/db/client.ts's DB_NAME / DB_VERSION exactly. Drifting from
 // these means the app either fails to open the database this seeds, or opens
@@ -38,19 +38,18 @@ interface SeedPayload {
 }
 
 /**
- * Navigates to the app, writes `persona`'s full seed data (user, workspace,
- * categories, transactions, budgets, goals) into IndexedDB, hashes their
- * password with the app's own PBKDF2 parameters, writes the matching
- * localStorage session, then reloads and waits for the authenticated
- * dashboard to actually render.
+ * Navigates to the app, writes `seed` (the persona's user, workspace,
+ * categories, transactions, budgets, goals) into IndexedDB, hashes the
+ * persona's password with the app's own PBKDF2 parameters, writes the
+ * matching localStorage session, then reloads and waits for the authenticated
+ * dashboard to actually render. The caller builds `seed` once, so the
+ * assistant's prompts name exactly what was written.
  */
-export async function seedPersona(page: Page, persona: Persona): Promise<void> {
+export async function seedPersona(page: Page, persona: Persona, seed: SeedData): Promise<void> {
   // Navigate first so IndexedDB/localStorage writes land on the app's own
   // origin — they're origin-scoped, and a page that has never navigated
   // anywhere has no meaningful origin to seed.
   await page.goto(APP_URL);
-
-  const seed = buildSeedData(persona, new Date());
 
   const payload: SeedPayload = {
     seed,

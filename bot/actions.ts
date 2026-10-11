@@ -66,19 +66,18 @@ import {
   UI_RESET_MAX_ESCAPES,
   UI_RESET_SETTLE_MS,
   ASSISTANT_SHORTCUT_RATE,
-  ASSISTANT_PROMPTS_MIN,
-  ASSISTANT_PROMPTS_MAX,
   ASSISTANT_RESPONSE_TIMEOUT_MS,
   ASSISTANT_CONFIRM_RATE,
   ASSISTANT_MAX_CARDS_PER_PROMPT,
+  ASSISTANT_TURNS_PER_RUN_MAX,
   makeRng,
   type Rng,
 } from "./config";
 import { errorCopy } from "../src/features/assistant/contract/errors";
+import { formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn } from "./assistant-prompts";
 import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
-  ASSISTANT_PROMPT_TEMPLATES,
   CUSTOM_CATEGORY_SEEDS,
   DEFAULT_CATEGORY_SEEDS,
   EXPENSE_TRANSACTION_RATE,
@@ -88,7 +87,6 @@ import {
   GOAL_SEED_POOL,
   SWATCH_PRESET_COLORS,
   WORKSPACE_NAME_TEMPLATES,
-  type AssistantPromptIntent,
   type CategorySeed,
 } from "./seed-data";
 
@@ -105,8 +103,8 @@ export interface SessionCtx {
   log: (msg: string) => void;
   /** Set once a panel alert appears; the assistant is not used again this session. */
   assistantOff: boolean;
-  /** The categories this session's workspace was seeded with; prompts name these. */
-  categorySeeds: readonly CategorySeed[];
+  /** This session's prompt plan, on its own RNG stream so model replies never shift it. */
+  assistant: AssistantPlanner;
 }
 
 export interface Action {
@@ -1172,21 +1170,9 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
 
 // not_configured and an exhausted spend limit will not clear within a run, so stop knocking.
 let assistantOffForRun = false;
+// One process runs every session of a run, so this counts the whole run and resets with the next one.
+let assistantRunTurns = 0;
 const RUN_ENDING_ALERTS = [errorCopy("not_configured"), errorCopy("provider_quota_exhausted")];
-
-function buildAssistantPrompt(
-  rng: Rng,
-  categories: readonly CategorySeed[],
-): { intent: AssistantPromptIntent; text: string } {
-  const template = rng.weighted(ASSISTANT_PROMPT_TEMPLATES, (t) => t.weight);
-  const expense = categories.filter((c) => c.scope === "expense");
-  const seed = rng.pick(expense.length > 0 ? [...expense] : [...categories]);
-  const text = template.text
-    .replaceAll("{category}", seed.name)
-    .replaceAll("{description}", rng.pick(seed.descriptions).toLowerCase())
-    .replaceAll("{amount}", String(rng.int(seed.amountMin, seed.amountMax)));
-  return { intent: template.intent, text };
-}
 
 function assistantPanel(page: Page): Locator {
   return page.getByRole("dialog", { name: "Assistant" });
@@ -1227,38 +1213,90 @@ async function settleAssistantReply(page: Page, ctx: SessionCtx, panel: Locator)
   throw new Error(`the assistant proposed more than ${ASSISTANT_MAX_CARDS_PER_PROMPT} confirm cards for one prompt`);
 }
 
+function assistantAvailable(ctx: SessionCtx): boolean {
+  return !assistantOffForRun && !ctx.assistantOff && assistantRunTurns < ASSISTANT_TURNS_PER_RUN_MAX && ctx.assistant.turnsLeft() > 0;
+}
+
+/** Real keystrokes only: a corrected typo is typed, backspaced and retyped. */
+async function typeTurn(panel: Locator, input: Locator, turn: Turn): Promise<void> {
+  for (const step of turn.typing) {
+    if (step.kind === "backspace") await input.press("Backspace");
+    else await input.pressSequentially(step.text, { delay: turn.charDelayMs });
+  }
+  if (turn.send === "click") await panel.getByRole("button", { name: "Send", exact: true }).click();
+  else await input.press("Enter");
+}
+
+async function toolNames(rows: Locator, from: number): Promise<string[]> {
+  const names: string[] = [];
+  const total = await rows.count();
+  for (let i = from; i < total; i++) {
+    const name = await rows.nth(i).getAttribute("data-tool");
+    if (name !== null) names.push(name);
+  }
+  return names;
+}
+
+async function askTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn, index: number, total: number): Promise<PromptOutcome> {
+  const log = panel.getByRole("log", { name: "Conversation" });
+  const users = log.locator('[data-message-role="user"]');
+  const replies = log.locator('[data-message-role="assistant"]');
+  const toolRows = log.locator("[data-tool]");
+  const sentBefore = await users.count();
+  const repliesBefore = await replies.count();
+  const toolsBefore = await toolRows.count();
+  const input = panel.getByLabel("Message", { exact: true });
+  await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  await typeTurn(panel, input, turn);
+  await users.nth(sentBefore).waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  await replies
+    .nth(repliesBefore)
+    .or(panel.getByRole("alert"))
+    .first()
+    .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
+  const outcome = await settleAssistantReply(page, ctx, panel);
+  const tools = await toolNames(toolRows, toolsBefore);
+  ctx.log(formatTurnLine(index, total, turn, tools, verdict(turn.expect, tools, outcome === "unavailable")));
+  return outcome;
+}
+
+async function startNewChat(panel: Locator, ctx: SessionCtx): Promise<void> {
+  await panel.getByRole("button", { name: "New chat", exact: true }).click();
+  await panel
+    .getByRole("log", { name: "Conversation" })
+    .locator("[data-message-role]")
+    .first()
+    .waitFor({ state: "detached", timeout: DIALOG_TIMEOUT_MS });
+  ctx.log("askAssistant: new chat");
+}
+
+async function askThreads(page: Page, ctx: SessionCtx, panel: Locator, threads: readonly ThreadPlan[]): Promise<void> {
+  const total = threads.reduce((sum, thread) => sum + thread.turns.length, 0);
+  const messages = panel.getByRole("log", { name: "Conversation" }).locator("[data-message-role]");
+  let index = 0;
+  for (const thread of threads) {
+    if (thread.newChat && (await messages.count()) > 0) await startNewChat(panel, ctx);
+    for (const turn of thread.turns) {
+      if (assistantRunTurns >= ASSISTANT_TURNS_PER_RUN_MAX) {
+        ctx.log("skipped:askAssistant (run turn cap)");
+        return;
+      }
+      assistantRunTurns += 1;
+      index += 1;
+      if ((await askTurn(page, ctx, panel, turn, index, total)) === "unavailable") return;
+      await think(page, ctx);
+    }
+  }
+}
+
 async function runAskAssistant(page: Page, ctx: SessionCtx): Promise<void> {
+  const plan = ctx.assistant.nextAction();
   await ensureAppRoute(page, ctx);
   if (ctx.rng.chance(ASSISTANT_SHORTCUT_RATE)) await page.keyboard.press("Control+j");
   else await page.getByRole("button", { name: "Open assistant", exact: true }).click();
   const panel = assistantPanel(page);
   await panel.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
-  const log = panel.getByRole("log", { name: "Conversation" });
-  const input = panel.getByLabel("Message", { exact: true });
-
-  const prompts = ctx.rng.int(ASSISTANT_PROMPTS_MIN, ASSISTANT_PROMPTS_MAX);
-  for (let i = 0; i < prompts; i++) {
-    const { intent, text } = buildAssistantPrompt(ctx.rng, ctx.categorySeeds);
-    const users = log.locator('[data-message-role="user"]');
-    const sentBefore = await users.count();
-    const repliesBefore = await log.locator('[data-message-role="assistant"]').count();
-    await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
-    await input.fill(text);
-    await input.press("Enter");
-    await users.nth(sentBefore).waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
-    await log
-      .locator('[data-message-role="assistant"]')
-      .nth(repliesBefore)
-      .or(panel.getByRole("alert"))
-      .first()
-      .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
-    ctx.log(`askAssistant: sent a ${intent} prompt`);
-    if ((await settleAssistantReply(page, ctx, panel)) === "unavailable") break;
-    await think(page, ctx);
-  }
-
-  const rows = (await log.locator("[data-tool]").allInnerTexts()).map((r) => r.trim());
-  ctx.log(`askAssistant: tool rows [${rows.join(" | ")}]`);
+  await askThreads(page, ctx, panel, plan.threads);
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });
   await think(page, ctx);
@@ -1411,7 +1449,7 @@ const ACTION_MAP: ActionMap = {
   },
   askAssistant: {
     name: "askAssistant",
-    weight: (ctx) => (assistantOffForRun || ctx.assistantOff ? 0 : archetypeWeight("askAssistant")(ctx)),
+    weight: (ctx) => (assistantAvailable(ctx) ? archetypeWeight("askAssistant")(ctx) : 0),
     run: runAskAssistant,
   },
   signOut: {

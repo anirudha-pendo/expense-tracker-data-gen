@@ -44,6 +44,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import {
   APP_URL,
+  ASSISTANT_FOCUS_SHARE,
   FAILURE_DIR,
   HEADLESS,
   MAX_ACTION_FAILURE_RATE,
@@ -83,12 +84,12 @@ import {
   type Action,
   type SessionCtx,
 } from "./actions";
-import { ARCHETYPES, PERSONAS, personaCategorySeeds, type ActionName, type Persona } from "./personas";
+import { INTENT_MIX, createAssistantPlanner, newVisitorPromptData, promptDataFromSeed } from "./assistant-prompts";
+import { ARCHETYPES, PERSONAS, buildSeedData, type ActionName, type Persona, type SeedData } from "./personas";
 import { clearBrowserState, seedPersona } from "./seed";
 import {
   buildNewVisitorIdentity,
   CURRENCY_OPTION_LABELS,
-  DEFAULT_CATEGORY_SEEDS,
   LOCALE_OPTION_LABELS,
   PERSONA_PASSWORD,
   REGION_WORKSPACE_OPTIONS,
@@ -558,11 +559,12 @@ async function driveSession(
   planned: PlannedSession,
   ctx: SessionCtx,
   counters: SessionCounters,
+  seed: SeedData | null,
 ): Promise<void> {
-  if (planned.kind === "returning") {
+  if (seed !== null) {
     // Writes the persona's history straight into IndexedDB and comes back on
     // a rendered dashboard, so the analytics agent sees a returning user.
-    await seedPersona(page, planned.persona);
+    await seedPersona(page, planned.persona, seed);
     const archetype = ARCHETYPES[planned.persona.archetype];
     const steps = ctx.rng.int(archetype.sessionLengthMin, archetype.sessionLengthMax);
     ctx.log(`walking ${steps} step(s)`);
@@ -640,9 +642,13 @@ async function captureFailure(
 async function runOneSession(
   browser: Browser,
   planned: PlannedSession,
+  planNow: Date,
   failureDir: string,
 ): Promise<SessionOutcome> {
   const startedAt = Date.now();
+  // One instant for the seed, the prompts' "today" and the browser clock, so "yesterday" means the same day to all three.
+  const sessionNow = new Date();
+  const seed = planned.kind === "returning" ? buildSeedData(planned.persona, sessionNow) : null;
   const counters: SessionCounters = { actions: 0, abandonments: 0, skips: 0, actionFailures: 0 };
   const rng = makeRng(planned.seed);
   const viewport = rng.pick(VIEWPORTS);
@@ -660,9 +666,15 @@ async function runOneSession(
         : ARCHETYPES[planned.persona.archetype].abandonRate,
     log,
     assistantOff: false,
-    // A new visitor's fresh workspace holds only the app's default categories.
-    categorySeeds:
-      planned.kind === "returning" ? personaCategorySeeds(planned.persona) : DEFAULT_CATEGORY_SEEDS,
+    assistant: createAssistantPlanner({
+      sessionSeed: planned.seed,
+      styleKey: seed === null ? planned.seed : planned.persona.id,
+      archetype: planned.persona.archetype,
+      mix: INTENT_MIX[planned.persona.archetype],
+      data: seed === null ? newVisitorPromptData(sessionNow) : promptDataFromSeed(seed, sessionNow),
+      planNow,
+      focusShare: ASSISTANT_FOCUS_SHARE,
+    }),
   };
 
   let context: BrowserContext | null = null;
@@ -680,7 +692,7 @@ async function runOneSession(
     await preparePage(page);
     log(`start ${planned.kind} as ${planned.persona.archetype} at ${viewport.width}x${viewport.height}`);
     await withTimeout(
-      driveSession(page, planned, ctx, counters),
+      driveSession(page, planned, ctx, counters, seed),
       SESSION_TIMEOUT_MS,
       `session exceeded SESSION_TIMEOUT_MS (${SESSION_TIMEOUT_MS}ms)`,
     );
@@ -739,7 +751,7 @@ async function runPool(
           if (index >= plan.sessions.length) return;
           const planned = plan.sessions[index];
           try {
-            outcomes[index] = await runOneSession(browser, planned, failureDir);
+            outcomes[index] = await runOneSession(browser, planned, plan.now, failureDir);
           } catch (err) {
             // runOneSession is written not to throw. This is the belt to that
             // braces: one session must never be able to take the run down,

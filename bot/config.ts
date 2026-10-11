@@ -342,9 +342,6 @@ export const QUICK_ADD_CHIPS_TIMEOUT_MS = 5000;
 
 /** Chance the assistant panel is opened with Ctrl+J rather than the header button. */
 export const ASSISTANT_SHORTCUT_RATE = 0.3;
-/** Prompts sent per askAssistant action. */
-export const ASSISTANT_PROMPTS_MIN = 1;
-export const ASSISTANT_PROMPTS_MAX = 3;
 /** How long one reply (including its tool rounds) gets before the action fails. */
 export const ASSISTANT_RESPONSE_TIMEOUT_MS = 60000;
 /** Chance a confirm card is confirmed rather than cancelled. */
@@ -362,6 +359,8 @@ export const ASSISTANT_FOLLOWUPS_MAX = 2;
 /** Turn caps per askAssistant and per session. */
 export const ASSISTANT_TURNS_PER_ACTION_MAX = 4;
 export const ASSISTANT_TURNS_PER_SESSION_MAX = 6;
+/** Turn cap for the whole run: an in-memory counter, never persisted between runs. */
+export const ASSISTANT_TURNS_PER_RUN_MAX = 60;
 /** Longest prompt the generator may produce. */
 export const ASSISTANT_PROMPT_MAX_CHARS = 200;
 
