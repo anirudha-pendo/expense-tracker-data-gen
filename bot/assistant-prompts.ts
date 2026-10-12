@@ -152,11 +152,11 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "incomeSummary",
     shape: "all",
     templates: {
-      terse: ["income {period}", "total earned {period}", "money in {period}"],
-      plain: ["How much did I earn {period}?", "What was my total income {period}?", "How much money came in {period}?"],
+      terse: ["income {period}", "total earned {period}", "money received {period}"],
+      plain: ["How much did I earn {period}?", "What was my total income {period}?", "How much money did I receive {period}?"],
       chatty: [
         "hey, how much did I actually make {period}?",
-        "ok so what did I bring in {period}, all sources?",
+        "ok so {period}, what did I bring in from all sources?",
         "just wondering how my income looks {period}",
       ],
     },
@@ -165,11 +165,11 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "incomeSummary",
     shape: "category",
     templates: {
-      terse: ["{category} income {period}", "earned from {category} {period}", "{category} earnings {period}"],
+      terse: ["income from {category} {period}", "earned from {category} {period}", "{category} total {period}"],
       plain: [
         "How much did I earn from {category} {period}?",
-        "What did {category} bring in {period}?",
-        "How much {category} income did I get {period}?",
+        "How much did {category} earn me {period}?",
+        "How much income did I get from {category} {period}?",
       ],
       chatty: [
         "hey, how much came in from {category} {period}?",
@@ -207,7 +207,7 @@ const OPENER_BANK: readonly CellBank[] = [
     shape: "amountRange",
     templates: {
       terse: ["{category} {range}", "{category} purchases {range} {period}"],
-      plain: ["Show me {category} transactions {range}.", "Which {category} expenses were {range} {period}?"],
+      plain: ["Show me {category} transactions {range}.", "Which {category} transactions were {range} {period}?"],
       chatty: [
         "hey, any {category} spends {range}? list them",
         "can you show me the {category} stuff that was {range} {period}?",
@@ -221,7 +221,7 @@ const OPENER_BANK: readonly CellBank[] = [
       terse: ["top {limit} {order} expenses {period}", "{order} purchases {period}"],
       plain: ["What were my {limit} {order} expenses {period}?", "Show me my {order} purchases {period}."],
       chatty: [
-        "hey what were the {order} things I paid for {period}?",
+        "hey what were the {order} things I bought {period}?",
         "ok show me my top {limit} {order} spends {period}, I'm scared",
       ],
     },
@@ -501,7 +501,7 @@ export const FOLLOWUP_KINDS = ["periodShift", "categoryShift", "refine", "amount
 export type FollowUpKind = (typeof FOLLOWUP_KINDS)[number];
 
 const FOLLOWUP_BANK: Record<FollowUpKind, readonly string[]> = {
-  periodShift: ["and {period}?", "what about {period}?", "same for {period}", "how about {period}?", "ok now {period}", "now show {period}", "{period} instead?"],
+  periodShift: ["and {period}?", "what about {period}?", "same thing {period}", "how about {period}?", "ok now {period}", "same question {period}", "{period} instead?"],
   categoryShift: ["what about {category}?", "and {category}?", "now {category}", "same for {category}", "how about {category}?", "ok and {category}", "{category} too?"],
   refine: ["just the top {limit}", "only show {limit}", "limit it to {limit}", "give me only {limit}", "top {limit} only", "can you cut that to {limit}?", "just {limit} please"],
   amountFix: ["actually make it {amount}", "wait, it was {amount}", "sorry, change that to {amount}", "oops, {amount} not that", "correction: {amount}", "make that {amount} instead", "no it was {amount}"],

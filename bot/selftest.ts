@@ -1111,6 +1111,29 @@ check("register, typo and slot rules hold per archetype, and style is stable per
   }
 });
 
+/** Two adjacent equal words ("Income income", "in in") where the template, not the persona's own data, supplied one. */
+function templateDoubledWord(parts: readonly Part[]): string | null {
+  const words = parts.flatMap((part) => (part.text.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((word) => ({ word, slot: part.slot })));
+  for (let i = 1; i < words.length; i++) {
+    const [a, b] = [words[i - 1], words[i]];
+    if ((a.word === b.word || `${a.word}s` === b.word) && !(a.slot && b.slot)) return `${a.word} ${b.word}`;
+  }
+  return null;
+}
+
+check("generated text never doubles a template word or puts a preposition before a period label", () => {
+  for (const persona of PERSONAS) {
+    for (let i = 0; i < 100; i++) {
+      for (const turn of sessionTurns(plannerFor(persona, `grammar:${persona.id}:${i}`))) {
+        assert.strictEqual(templateDoubledWord(turn.rendered), null, `"${turn.text}" doubles a word`);
+        assert.ok(!/\b(?:for|show) (?:in|since|today|yesterday|this|last|next)\b/i.test(turn.text), `"${turn.text}" has a preposition before its period`);
+      }
+    }
+  }
+  assert.strictEqual(templateDoubledWord([{ text: "Other Income", slot: true }, { text: " income", slot: false }]), "income income");
+  assert.strictEqual(templateDoubledWord([{ text: "work reimbursement", slot: true }, { text: " ", slot: false }, { text: "Reimbursement", slot: true }]), null);
+});
+
 check("planner caps hold over 10,000 sessions and generated text is safe to type and log (AC11, AC12, RF1)", () => {
   const banned = [/@/, /sk-/i, /http/i, /www\./i, /\d{12,}/, /["\n\r{}[\]]/];
   const identities = PERSONAS.flatMap((p) => [...p.displayName.split(" "), p.username]).map((word) => word.toLowerCase());
