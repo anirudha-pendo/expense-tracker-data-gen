@@ -907,7 +907,7 @@ export function formatAssistantBlock(logs: readonly AssistantSessionLog[]): stri
   );
   const lines = [
     "",
-    `assistant turns   ${summary.turns} (${summary.unavailable} unavailable, ${summary.capSkips} action(s) cut by the run turn cap)`,
+    `assistant turns   ${summary.turns} (${summary.unavailable} unavailable, ${summary.errors} error, ${summary.capSkips} action(s) cut by the run turn cap)`,
     `run turn cap      ${logs.some((log) => log.capReached) ? "reached" : "not reached"} (${ASSISTANT_TURNS_PER_RUN_MAX})`,
     `in-scope match    ${formatMatchRate(summary.inScopeMatch, summary.inScopeJudged)}`,
   ];
@@ -915,8 +915,16 @@ export function formatAssistantBlock(logs: readonly AssistantSessionLog[]): stri
     lines.push(
       "",
       renderTable(
-        ["intent", "turns", "match", "miss", "overreach", "unavailable"],
-        summary.rows.map((row) => [row.intent, String(row.turns), String(row.match), String(row.miss), String(row.overreach), String(row.unavailable)]),
+        ["intent", "turns", "match", "miss", "overreach", "unavailable", "error"],
+        summary.rows.map((row) => [
+          row.intent,
+          String(row.turns),
+          String(row.match),
+          String(row.miss),
+          String(row.overreach),
+          String(row.unavailable),
+          String(row.error),
+        ]),
       ),
     );
   }

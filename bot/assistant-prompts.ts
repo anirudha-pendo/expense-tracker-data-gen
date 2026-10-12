@@ -82,6 +82,8 @@ export const INTENT_EXPECT: Record<Intent, Expect> = {
 };
 
 export type Verdict = "match" | "miss" | "overreach" | "unavailable";
+/** A turn's logged result: its verdict, or "error" when the turn threw before it could be judged. */
+export type TurnResult = Verdict | "error";
 
 export function verdict(expect: Expect, tools: readonly string[], unavailable: boolean): Verdict {
   if (unavailable) return "unavailable";
@@ -1474,18 +1476,20 @@ export function createAssistantPlanner(input: PlannerInput): AssistantPlanner {
   };
 }
 
-export function formatTurnLine(index: number, total: number, turn: Turn, tools: readonly string[], result: Verdict): string {
+/** `tools` is null when a thrown turn left the tool rows unreadable; the line then says `got=?`. */
+export function formatTurnLine(index: number, total: number, turn: Turn, tools: readonly string[] | null, result: TurnResult): string {
   const expect = turn.expect.must.length === 0 ? "none" : turn.expect.must.join("|");
+  const got = tools === null ? "?" : `[${tools.join(",")}]`;
   return (
     `askAssistant: turn ${index}/${total} intent=${turn.intent} shape=${turn.shape} scope=${turn.scopeLabel} ` +
-    `period=${turn.period} kind=${turn.kind} expect=${expect} got=[${tools.join(",")}] verdict=${result} text="${turn.text}"`
+    `period=${turn.period} kind=${turn.kind} expect=${expect} got=${got} verdict=${result} text="${turn.text}"`
   );
 }
 
 export interface TurnRecord {
   intent: Intent;
   scopeLabel: ScopeLabel;
-  verdict: Verdict;
+  verdict: TurnResult;
 }
 
 export interface IntentRow {
@@ -1495,11 +1499,13 @@ export interface IntentRow {
   miss: number;
   overreach: number;
   unavailable: number;
+  error: number;
 }
 
 export interface AssistantSummary {
   turns: number;
   unavailable: number;
+  errors: number;
   capSkips: number;
   /** In-scope intents with a valid scope that got an answer. */
   inScopeJudged: number;
@@ -1509,15 +1515,26 @@ export interface AssistantSummary {
 }
 
 export function summarizeAssistant(records: readonly TurnRecord[], capSkips: number): AssistantSummary {
-  const judged = records.filter((r) => IN_SCOPE_INTENTS.includes(r.intent) && r.scopeLabel === "valid" && r.verdict !== "unavailable");
+  const judged = records.filter(
+    (r) => IN_SCOPE_INTENTS.includes(r.intent) && r.scopeLabel === "valid" && r.verdict !== "unavailable" && r.verdict !== "error",
+  );
   const rows = INTENTS.map((intent): IntentRow => {
     const mine = records.filter((r) => r.intent === intent);
-    const count = (v: Verdict): number => mine.filter((r) => r.verdict === v).length;
-    return { intent, turns: mine.length, match: count("match"), miss: count("miss"), overreach: count("overreach"), unavailable: count("unavailable") };
+    const count = (v: TurnResult): number => mine.filter((r) => r.verdict === v).length;
+    return {
+      intent,
+      turns: mine.length,
+      match: count("match"),
+      miss: count("miss"),
+      overreach: count("overreach"),
+      unavailable: count("unavailable"),
+      error: count("error"),
+    };
   }).filter((row) => row.turns > 0);
   return {
     turns: records.length,
     unavailable: records.filter((r) => r.verdict === "unavailable").length,
+    errors: records.filter((r) => r.verdict === "error").length,
     capSkips,
     inScopeJudged: judged.length,
     inScopeMatch: judged.filter((r) => r.verdict === "match").length,

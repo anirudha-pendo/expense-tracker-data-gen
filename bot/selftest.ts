@@ -1177,6 +1177,8 @@ check("the turn log line has the exact req 20 shape", () => {
   const anyOf = formatTurnLine(2, 2, { ...turn, expect: { must: ["addTransaction", "updateTransaction"], forbid: [] } }, [], "miss");
   assert.ok(anyOf.includes(" expect=addTransaction|updateTransaction got=[] verdict=miss "), anyOf);
   assert.ok(formatTurnLine(1, 1, { ...turn, expect: NO_TOOLS }, [], "match").includes(" expect=none "));
+  assert.ok(formatTurnLine(1, 1, turn, ["addTransaction"], "error").includes(" got=[addTransaction] verdict=error "));
+  assert.ok(formatTurnLine(1, 1, turn, null, "error").includes(" got=? verdict=error text="));
 });
 
 check("summarizeAssistant counts in-scope matches over valid, answered turns only", () => {
@@ -1186,14 +1188,23 @@ check("summarizeAssistant counts in-scope matches over valid, answered turns onl
     { intent: "spendSummary", scopeLabel: "invalid:period", verdict: "match" },
     { intent: "addTransaction", scopeLabel: "valid", verdict: "unavailable" },
     { intent: "offTopic", scopeLabel: "valid", verdict: "overreach" },
+    { intent: "addTransaction", scopeLabel: "valid", verdict: "error" },
   ];
   const summary = summarizeAssistant(records, 2);
   assert.deepStrictEqual(
-    { turns: summary.turns, unavailable: summary.unavailable, capSkips: summary.capSkips, judged: summary.inScopeJudged, match: summary.inScopeMatch },
-    { turns: 5, unavailable: 1, capSkips: 2, judged: 2, match: 1 },
+    {
+      turns: summary.turns,
+      unavailable: summary.unavailable,
+      errors: summary.errors,
+      capSkips: summary.capSkips,
+      judged: summary.inScopeJudged,
+      match: summary.inScopeMatch,
+    },
+    { turns: 6, unavailable: 1, errors: 1, capSkips: 2, judged: 2, match: 1 },
   );
   assert.deepStrictEqual(summary.rows.map((r) => r.intent), ["spendSummary", "addTransaction", "offTopic"]);
-  assert.deepStrictEqual(summary.rows[0], { intent: "spendSummary", turns: 3, match: 2, miss: 1, overreach: 0, unavailable: 0 });
+  assert.deepStrictEqual(summary.rows[0], { intent: "spendSummary", turns: 3, match: 2, miss: 1, overreach: 0, unavailable: 0, error: 0 });
+  assert.deepStrictEqual(summary.rows[1], { intent: "addTransaction", turns: 2, match: 0, miss: 0, overreach: 0, unavailable: 1, error: 1 });
   const empty = summarizeAssistant([], 0);
   assert.deepStrictEqual({ turns: empty.turns, rows: empty.rows.length }, { turns: 0, rows: 0 });
 });
@@ -1209,22 +1220,22 @@ check("the match rate never prints NaN (RF4)", () => {
 check("the run summary's assistant block totals every session and never prints NaN", () => {
   assert.deepStrictEqual(formatAssistantBlock([]), [
     "",
-    "assistant turns   0 (0 unavailable, 0 action(s) cut by the run turn cap)",
+    "assistant turns   0 (0 unavailable, 0 error, 0 action(s) cut by the run turn cap)",
     "run turn cap      not reached (60)",
     "in-scope match    0/0 (n/a)",
   ]);
   const lines = formatAssistantBlock([
-    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "match" }, { intent: "offTopic", scopeLabel: "valid", verdict: "match" }], capSkips: 1, capReached: false },
+    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "match" }, { intent: "offTopic", scopeLabel: "valid", verdict: "error" }], capSkips: 1, capReached: false },
     { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "miss" }, { intent: "addTransaction", scopeLabel: "valid", verdict: "unavailable" }], capSkips: 0, capReached: true },
   ]);
-  assert.strictEqual(lines[1], "assistant turns   4 (1 unavailable, 1 action(s) cut by the run turn cap)");
+  assert.strictEqual(lines[1], "assistant turns   4 (1 unavailable, 1 error, 1 action(s) cut by the run turn cap)");
   assert.strictEqual(lines[2], "run turn cap      reached (60)");
   assert.strictEqual(lines[3], "in-scope match    1/2 (50%)");
   const table = lines.slice(5).join("\n").split("\n");
-  assert.match(table[0], /^intent\s+turns\s+match\s+miss\s+overreach\s+unavailable$/);
-  assert.match(table[2], /^spendSummary\s+2\s+1\s+1\s+0\s+0$/);
-  assert.match(table[3], /^addTransaction\s+1\s+0\s+0\s+0\s+1$/);
-  assert.match(table[4], /^offTopic\s+1\s+1\s+0\s+0\s+0$/);
+  assert.match(table[0], /^intent\s+turns\s+match\s+miss\s+overreach\s+unavailable\s+error$/);
+  assert.match(table[2], /^spendSummary\s+2\s+1\s+1\s+0\s+0\s+0$/);
+  assert.match(table[3], /^addTransaction\s+1\s+0\s+0\s+0\s+1\s+0$/);
+  assert.match(table[4], /^offTopic\s+1\s+0\s+0\s+0\s+0\s+1$/);
 });
 
 check("the run turn cap announces its last slot, then refuses; only an action that sent nothing is a skip", () => {

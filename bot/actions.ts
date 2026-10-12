@@ -74,7 +74,7 @@ import {
   type Rng,
 } from "./config";
 import { errorCopy } from "../src/features/assistant/contract/errors";
-import { formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn, type TurnRecord } from "./assistant-prompts";
+import { formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn, type TurnRecord, type TurnResult } from "./assistant-prompts";
 import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
@@ -1264,14 +1264,13 @@ async function toolNames(rows: Locator, from: number): Promise<string[]> {
   return names;
 }
 
-async function askTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn, index: number, total: number): Promise<PromptOutcome> {
+/** Types and sends one turn, then waits until the reply and any confirm cards have settled. */
+async function sendTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn): Promise<PromptOutcome> {
   const log = panel.getByRole("log", { name: "Conversation" });
   const users = log.locator('[data-message-role="user"]');
   const replies = log.locator('[data-message-role="assistant"]');
-  const toolRows = log.locator("[data-tool]");
   const sentBefore = await users.count();
   const repliesBefore = await replies.count();
-  const toolsBefore = await toolRows.count();
   const input = panel.getByLabel("Message", { exact: true });
   await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
   await typeTurn(panel, input, turn);
@@ -1281,12 +1280,30 @@ async function askTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn, 
     .or(panel.getByRole("alert"))
     .first()
     .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
-  const outcome = await settleAssistantReply(page, ctx, panel);
-  const tools = await toolNames(toolRows, toolsBefore);
-  const result = verdict(turn.expect, tools, outcome === "unavailable");
+  return settleAssistantReply(page, ctx, panel);
+}
+
+function recordTurn(ctx: SessionCtx, index: number, total: number, turn: Turn, tools: readonly string[] | null, result: TurnResult): void {
   ctx.log(formatTurnLine(index, total, turn, tools, result));
   ctx.assistantLog.turns.push({ intent: turn.intent, scopeLabel: turn.scopeLabel, verdict: result });
-  return outcome;
+}
+
+/** Every turn leaves its line, including one that throws (a reply timeout, say); the throw still fails the action. */
+async function askTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn, index: number, total: number): Promise<PromptOutcome> {
+  const toolRows = panel.getByRole("log", { name: "Conversation" }).locator("[data-tool]");
+  let toolsBefore: number | null = null;
+  try {
+    toolsBefore = await toolRows.count();
+    const outcome = await sendTurn(page, ctx, panel, turn);
+    const tools = await toolNames(toolRows, toolsBefore);
+    recordTurn(ctx, index, total, turn, tools, verdict(turn.expect, tools, outcome === "unavailable"));
+    return outcome;
+  } catch (err) {
+    // A dead page cannot be read; got=? says so, and the original error is the one that propagates.
+    const tools = toolsBefore === null ? null : await toolNames(toolRows, toolsBefore).catch(() => null);
+    recordTurn(ctx, index, total, turn, tools, "error");
+    throw err;
+  }
 }
 
 async function startNewChat(panel: Locator, ctx: SessionCtx): Promise<void> {

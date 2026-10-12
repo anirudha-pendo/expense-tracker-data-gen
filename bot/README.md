@@ -393,11 +393,11 @@ IN      ...
 EU      ...
 US      ...
 
-assistant turns   <count> (<count> unavailable, <count> action(s) cut by the run turn cap)
+assistant turns   <count> (<count> unavailable, <count> error, <count> action(s) cut by the run turn cap)
 run turn cap      <reached|not reached> (60)
 in-scope match    <match>/<judged> (<pct>%)
 
-intent  turns  match  miss  overreach  unavailable
+intent  turns  match  miss  overreach  unavailable  error
 ...
 
 pendo ready       <ready>/<sessions> session(s), <count> with an id mismatch
@@ -511,17 +511,21 @@ askAssistant: turn 1/1 intent=addTransaction shape=full scope=valid period=- kin
 `got=` lists the `data-tool` names of the tool rows that appeared in the panel
 after this turn was sent — read from the page, never from the network.
 `verdict` is `match`, `miss` (no required tool), `overreach` (a forbidden tool
-ran; beats miss) or `unavailable` (an alert ended the turn). Verdicts measure
+ran; beats miss) or `unavailable` (an alert ended the turn). A turn that throws
+(a reply timeout, say) still logs its line, with `verdict=error` and `got=?`
+when the tool rows can no longer be read, and is followed by the action's
+`failed:askAssistant` line; it counts in the turn total and the `error` column
+but not in the in-scope match rate. Verdicts measure
 the model and never change the exit code.
 
 ### The `assistant` and `pendo` summary blocks
 
 ```
-assistant turns   <turns> (<n> unavailable, <n> action(s) cut by the run turn cap)
+assistant turns   <turns> (<n> unavailable, <n> error, <n> action(s) cut by the run turn cap)
 run turn cap      <reached|not reached> (60)
 in-scope match    <match>/<judged> (<pct>%)
 
-intent            turns  match  miss  overreach  unavailable
+intent            turns  match  miss  overreach  unavailable  error
 <one row per intent used this run>
 
 pendo ready       <ready>/<sessions> session(s), <n> with an id mismatch
