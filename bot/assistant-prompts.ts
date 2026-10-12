@@ -1672,11 +1672,11 @@ function shapeWeight(cell: Cell): number {
 
 const DRAW_ATTEMPTS = 5;
 
-/** An intent from `mix`, then a shape the data can fill; null after five unfillable draws. */
-export function drawCell(rng: Rng, mix: Record<Intent, number>, data: PromptData): Cell | null {
-  const intents = INTENTS.filter((intent) => mix[intent] > 0);
+/** An intent from `mix`, then an allowed shape the data can fill; null after five unfillable draws. */
+export function drawCell(rng: Rng, mix: Record<Intent, number>, data: PromptData, allowed: (cell: Cell) => boolean = () => true): Cell | null {
+  const intents = INTENTS.filter((intent) => mix[intent] > 0 && cellsOf(intent).some(allowed));
   for (let attempt = 0; attempt < DRAW_ATTEMPTS; attempt++) {
-    const shapes = cellsOf(rng.weighted(intents, (intent) => mix[intent])).filter((cell) => cellFillable(cell, data));
+    const shapes = cellsOf(rng.weighted(intents, (intent) => mix[intent])).filter((cell) => allowed(cell) && cellFillable(cell, data));
     if (shapes.length > 0) return rng.weighted(shapes, shapeWeight);
   }
   return null;
@@ -1697,13 +1697,19 @@ function canBeInvalid(template: Template): boolean {
   return invalidKinds(template.slots).length > 0;
 }
 
-function makeOpener(gen: Gen): Turn {
+/** Mid-thread, a clarify or a feedback remark reads as a reply to the last answer, so the model may rightly retry it. */
+function fitsMidThread(cell: Cell): boolean {
+  return cell.intent !== "clarify" && !(cell.intent === "meta" && cell.shape === "feedback");
+}
+
+function makeOpener(gen: Gen, midThread = false): Turn {
   const { rng, data } = gen;
+  const allowed = midThread ? fitsMidThread : () => true;
   const focusRoll = rng.chance(gen.focusShare);
   const invalidRoll = rng.chance(gen.knobs.invalidScope);
   const register = rng.weighted([...REGISTERS], (r) => gen.style.registerWeights[r]);
-  const useFocus = focusRoll && gen.mix[gen.focus.intent] > 0 && cellFillable(gen.focus, data);
-  const drawn = useFocus ? gen.focus : drawCell(rng, gen.mix, data);
+  const useFocus = focusRoll && gen.mix[gen.focus.intent] > 0 && allowed(gen.focus) && cellFillable(gen.focus, data);
+  const drawn = useFocus ? gen.focus : drawCell(rng, gen.mix, data, allowed);
   let cell: Cell = drawn ?? FALLBACK_CELL;
   let pool = drawn === null ? templatesFor(cell, register).filter((t) => t.slots.includes("period")) : templatesFor(cell, register);
   const invalid = invalidRoll && IN_SCOPE_INTENTS.includes(cell.intent);
@@ -1749,19 +1755,14 @@ function candidateFor(parent: Turn, data: PromptData): PromptTransaction | undef
   return data.transactions.find((tx) => sameName(tx.description, ambiguous) && counts.get(pairKey(tx)) === 1);
 }
 
-/** An opener, or a nextQuestion that asked a fresh one; an answer to a clarify is neither, so it is never answered twice. */
-function asksAfresh(turn: Turn): boolean {
-  return turn.kind === "opener" || turn.kind === "followup:nextQuestion";
-}
-
 function followUpKinds(parent: Turn, data: PromptData): FollowUpKind[] {
   const kinds: FollowUpKind[] = ["thanks", "nextQuestion"];
   if (SUMMARY_INTENTS.includes(parent.intent)) kinds.push("periodShift");
   if (CATEGORY_SHIFT_INTENTS.includes(parent.intent)) kinds.push("categoryShift");
   if (parent.intent === "findTransactions" || parent.intent === "topTransactions") kinds.push("refine");
   if (parent.intent === "addTransaction" && parent.scope.amount !== undefined) kinds.push("amountFix");
-  if (asksAfresh(parent) && (parent.shape === "missingAmount" || parent.shape === "missingWhat")) kinds.push("answerClarify");
-  if (asksAfresh(parent) && parent.shape === "ambiguousTarget" && candidateFor(parent, data) !== undefined) kinds.push("pickCandidate");
+  if (parent.kind === "opener" && (parent.shape === "missingAmount" || parent.shape === "missingWhat")) kinds.push("answerClarify");
+  if (parent.kind === "opener" && parent.shape === "ambiguousTarget" && candidateFor(parent, data) !== undefined) kinds.push("pickCandidate");
   return kinds;
 }
 
@@ -1786,7 +1787,7 @@ function relabel(label: ScopeLabel, replaced: InvalidKind): ScopeLabel {
 function makeFollowUp(gen: Gen, parent: Turn): Turn {
   const { rng, data } = gen;
   const kind = rng.pick(followUpKinds(parent, data));
-  if (kind === "nextQuestion") return { ...makeOpener(gen), kind: "followup:nextQuestion" };
+  if (kind === "nextQuestion") return { ...makeOpener(gen, true), kind: "followup:nextQuestion" };
   let scope: Scope = { ...parent.scope };
   let scopeLabel = parent.scopeLabel;
   let intent = parent.intent;

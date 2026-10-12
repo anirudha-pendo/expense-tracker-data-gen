@@ -1553,7 +1553,6 @@ check("chat length per archetype: power chats longest, churning shortest, explor
 
 check("nextQuestion follows every parent intent and is labelled and judged like an opener (AD7)", () => {
   const parents = new Set<Intent>();
-  let answeredAfterNext = 0;
   let threads = 0;
   for (let i = 0; threads < 10000; i++) {
     const persona = PERSONAS[i % PERSONAS.length];
@@ -1564,18 +1563,44 @@ check("nextQuestion follows every parent intent and is labelled and judged like 
         if (index === 0) return;
         const parent = thread.turns[index - 1];
         if (turn.kind === "followup:answerClarify" || turn.kind === "followup:pickCandidate") {
-          assert.ok(parent.kind === "opener" || parent.kind === "followup:nextQuestion", `${turn.kind} after ${parent.kind}`);
-          if (parent.kind === "followup:nextQuestion") answeredAfterNext++;
+          assert.strictEqual(parent.kind, "opener", `${turn.kind} after ${parent.kind}`);
         }
         if (turn.kind !== "followup:nextQuestion") return;
         parents.add(parent.intent);
+        assert.ok(!needsFreshChat(turn), `mid-thread nextQuestion ${turn.intent}/${turn.shape} "${turn.text}"`);
         assert.strictEqual(isScopeValid(turn.scope, data), turn.scopeLabel === "valid", `${turn.scopeLabel} nextQuestion "${turn.text}"`);
         assert.deepStrictEqual(turn.expect, turn.scopeLabel === "valid" ? INTENT_EXPECT[turn.intent] : NO_WRITES, turn.text);
       });
     }
   }
   assert.deepStrictEqual([...parents].sort(), [...INTENTS].sort());
-  assert.ok(answeredAfterNext > 0, "a clarify asked as a nextQuestion never got its answer");
+});
+
+/** A clarify or a feedback remark only reads right with no history: mid-thread the model may rightly retry the last request. */
+function needsFreshChat(cell: { intent: Intent; shape: string }): boolean {
+  return cell.intent === "clarify" || (cell.intent === "meta" && cell.shape === "feedback");
+}
+
+check("a nextQuestion never draws a clarify or feedback opener, even on the day that cell is the focus", () => {
+  const days = FOCUS_DAYS.filter((now) => needsFreshChat(focusCell(now)));
+  assert.strictEqual(days.length, 4, "clarify x3 and meta/feedback should each be one day's focus");
+  let nextQuestions = 0;
+  let freshOpeners = 0;
+  for (const now of days) {
+    PERSONAS.forEach((persona, i) => {
+      for (let session = 0; session < 20; session++) {
+        for (const thread of plannerFor(persona, `fresh:${now.toISOString()}:${session}:${i}`, { now, focusShare: 1 }).nextAction().threads) {
+          for (const turn of thread.turns) {
+            if (turn.kind === "opener" && needsFreshChat(turn)) freshOpeners++;
+            if (turn.kind !== "followup:nextQuestion") continue;
+            nextQuestions++;
+            assert.ok(!needsFreshChat(turn), `${now.toISOString().slice(0, 10)} nextQuestion ${turn.intent}/${turn.shape} "${turn.text}"`);
+          }
+        }
+      }
+    });
+  }
+  assert.ok(nextQuestions > 100 && freshOpeners > 100, `${nextQuestions} nextQuestions, ${freshOpeners} focus openers`);
 });
 
 check("a new visitor's whole session, follow-ups included, never needs data an empty workspace lacks", () => {

@@ -516,8 +516,11 @@ New visitors use the `explorer` row. The kind is drawn uniformly from those
 that fit the previous turn. `thanks` ends a thread. `nextQuestion` fits after
 any turn: it is a fresh opener (same mix, focus cell, invalid-scope rate and
 style as an opener) logged as `kind=followup:nextQuestion` with that opener's
-own intent, shape, scope and expectation. It is what lets a chat that opened
-with a write or an off-path question keep going.
+own intent, shape, scope and expectation. It never draws a `clarify` or a
+`meta/feedback` opener ("log 15", "Not really what I asked for."): mid-chat
+those read as a reply to the last answer, and the model may rightly retry it.
+It is what lets a chat that opened with a write or an off-path question keep
+going.
 
 A `clarify/ambiguousTarget` opener either deletes ("delete my
 coffee") or names the new amount ("change my coffee to 4.50"), so its
