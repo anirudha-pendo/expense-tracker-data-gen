@@ -83,7 +83,6 @@ import {
   type SlotValues,
   type StyleKnobs,
   type StyleProfile,
-  type Template,
   type Turn,
   type TurnRecord,
   type TypingStep,
@@ -571,28 +570,6 @@ check("every opener template uses exactly its cell's required slots plus allowed
     for (const slot of rule.required) assert.ok(t.slots.includes(slot), `"${t.text}" is missing {${slot}}`);
     for (const slot of t.slots) assert.ok([...rule.required, ...rule.optional].includes(slot), `"${t.text}" may not use {${slot}}`);
   }
-});
-
-check("bank sizes meet the spec minimums (AC2)", () => {
-  const count = (pred: (t: Template) => boolean): number => OPENER_TEMPLATES.filter(pred).length;
-  for (const intent of IN_SCOPE_INTENTS) {
-    assert.ok(count((t) => t.intent === intent) >= 12, `${intent} has fewer than 12 templates`);
-    for (const register of STYLE_REGISTERS) {
-      assert.ok(count((t) => t.intent === intent && t.register === register) >= 4, `${intent} has fewer than 4 ${register} templates`);
-    }
-  }
-  for (const cell of CELLS) {
-    const n = count((t) => t.intent === cell.intent && t.shape === cell.shape);
-    const min = IN_SCOPE_INTENTS.includes(cell.intent) ? 2 : 4;
-    assert.ok(n >= min, `${cell.intent}/${cell.shape} has ${n} templates, needs ${min}`);
-  }
-  assert.ok(count((t) => t.intent === "vague") >= 15, "vague needs 15");
-  assert.ok(count((t) => t.intent === "adviceRefusal") >= 12, "adviceRefusal needs 12");
-  assert.ok(count((t) => t.intent === "offTopic") >= 30, "offTopic needs 30");
-  for (const kind of BANKED_FOLLOWUP_KINDS) {
-    assert.ok(FOLLOWUP_TEMPLATES.filter((t) => t.kind === kind).length >= 6, `follow-up ${kind} needs 6`);
-  }
-  assert.ok(OPENER_TEMPLATES.length + FOLLOWUP_TEMPLATES.length >= 250, "the bank needs 250 templates in total");
 });
 
 check("renderTemplate resolves [a|b], keeps slot values in their own parts, and refuses a missing value", () => {
@@ -1800,7 +1777,8 @@ const CELL_FLOORS: Record<string, { perRegister: number; total: number }> = {
   "meta/feedback": { perRegister: 0, total: 8 },
 };
 
-check("every opener cell meets its D4 template floor (AD8)", () => {
+check("every opener cell and follow-up kind meets its D4 template floor; totals reach 400 and 84 (AD8)", () => {
+  assert.deepStrictEqual(Object.keys(CELL_FLOORS).sort(), CELLS.map((c) => `${c.intent}/${c.shape}`).sort(), "every cell needs a floor");
   for (const [key, floor] of Object.entries(CELL_FLOORS)) {
     const templates = OPENER_TEMPLATES.filter((t) => `${t.intent}/${t.shape}` === key);
     assert.ok(templates.length >= floor.total, `${key} has ${templates.length} templates, needs ${floor.total}`);
@@ -1809,6 +1787,12 @@ check("every opener cell meets its D4 template floor (AD8)", () => {
       assert.ok(n >= floor.perRegister, `${key} has ${n} ${register} templates, needs ${floor.perRegister}`);
     }
   }
+  for (const kind of BANKED_FOLLOWUP_KINDS) {
+    const n = FOLLOWUP_TEMPLATES.filter((t) => t.kind === kind).length;
+    assert.ok(n >= 12, `follow-up ${kind} has ${n} templates, needs 12`);
+  }
+  assert.ok(OPENER_TEMPLATES.length >= 400, `${OPENER_TEMPLATES.length} opener templates, needs 400`);
+  assert.ok(FOLLOWUP_TEMPLATES.length >= 84, `${FOLLOWUP_TEMPLATES.length} follow-up templates, needs 84`);
 });
 
 check("one power and one casual persona see many wordings of one question, none above 25% (AD9)", () => {
