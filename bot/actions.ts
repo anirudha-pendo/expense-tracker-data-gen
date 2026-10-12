@@ -66,6 +66,7 @@ import {
   UI_RESET_MAX_ESCAPES,
   UI_RESET_SETTLE_MS,
   ASSISTANT_SHORTCUT_RATE,
+  ASSISTANT_ABANDON_TYPED_RATE,
   ASSISTANT_RESPONSE_TIMEOUT_MS,
   ASSISTANT_CONFIRM_RATE,
   ASSISTANT_MAX_CARDS_PER_PROMPT,
@@ -74,7 +75,7 @@ import {
   type Rng,
 } from "./config";
 import { errorCopy } from "../src/features/assistant/contract/errors";
-import { formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn, type TurnRecord, type TurnResult } from "./assistant-prompts";
+import { abandonPrefix, formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn, type TurnRecord, type TurnResult } from "./assistant-prompts";
 import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
@@ -1340,13 +1341,35 @@ async function askThreads(page: Page, ctx: SessionCtx, panel: Locator, threads: 
   }
 }
 
+/** Leaves before the first send, like the other dialogs: sometimes part of the prompt typed, then Escape or the Close button. */
+async function abandonAssistant(page: Page, ctx: SessionCtx, panel: Locator, first: Turn | undefined): Promise<void> {
+  if (first !== undefined && ctx.rng.chance(ASSISTANT_ABANDON_TYPED_RATE)) {
+    const prefix = abandonPrefix(first.text, ctx.rng);
+    if (prefix.length > 0) {
+      const input = panel.getByLabel("Message", { exact: true });
+      await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+      await input.pressSequentially(prefix, { delay: first.charDelayMs });
+    }
+  }
+  if (ctx.rng.chance(ABANDON_VIA_ESCAPE_RATE)) await page.keyboard.press("Escape");
+  else await panel.getByRole("button", { name: "Close", exact: true }).click();
+  await panel.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });
+  ctx.log("abandoned:askAssistant");
+}
+
 async function runAskAssistant(page: Page, ctx: SessionCtx): Promise<void> {
+  // Drawn before the abandon roll so the prompt stream never depends on it; an abandoned plan still uses up session turns.
   const plan = ctx.assistant.nextAction();
   await ensureAppRoute(page, ctx);
   if (ctx.rng.chance(ASSISTANT_SHORTCUT_RATE)) await page.keyboard.press("Control+j");
   else await page.getByRole("button", { name: "Open assistant", exact: true }).click();
   const panel = assistantPanel(page);
   await panel.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  if (ctx.rng.chance(ctx.abandonRate)) {
+    await abandonAssistant(page, ctx, panel, plan.threads.at(0)?.turns.at(0));
+    await think(page, ctx);
+    return;
+  }
   await askThreads(page, ctx, panel, plan.threads);
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });

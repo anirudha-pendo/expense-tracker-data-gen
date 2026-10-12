@@ -39,6 +39,7 @@ import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
   ARCHETYPE_STYLE,
   BANKED_FOLLOWUP_KINDS,
+  abandonPrefix,
   CELLS,
   FOLLOWUP_KINDS,
   FOLLOWUP_TEMPLATES,
@@ -1613,6 +1614,31 @@ check("a new visitor's whole session, follow-ups included, never needs data an e
     }
   }
   assert.ok(followUps > 0);
+});
+
+check("abandonPrefix types a strict prefix of 30-70% of the prompt, at least 3 characters, and nothing for 3 or fewer (AD2)", () => {
+  for (const short of ["", "hi", "yo!"]) assert.strictEqual(abandonPrefix(short, makeRng("short")), "", JSON.stringify(short));
+  assert.strictEqual(abandonPrefix("abcd", makeRng("four")), "abc");
+  const texts: string[] = [];
+  for (let i = 0; texts.length < 1000; i++) texts.push(...sessionTurns(plannerFor(PERSONAS[i % PERSONAS.length], `abandon:${i}`)).map((turn) => turn.text));
+  const rng = makeRng("abandon-prefix");
+  let typed = 0;
+  for (const text of texts.slice(0, 1000)) {
+    const prefix = abandonPrefix(text, rng);
+    if (text.length <= 3) {
+      assert.strictEqual(prefix, "", text);
+      continue;
+    }
+    typed++;
+    assert.ok(text.startsWith(prefix), `"${prefix}" is not a prefix of "${text}"`);
+    assert.ok(prefix.length >= 3 && prefix.length <= text.length - 1, `${prefix.length} of ${text.length}: "${text}"`);
+    if (text.length >= 10) {
+      assert.ok(prefix.length >= 0.3 * text.length - 1 && prefix.length <= 0.7 * text.length + 1, `${prefix.length} of ${text.length}: "${text}"`);
+    }
+  }
+  assert.ok(typed > 900, `only ${typed} prompts longer than 3 characters`);
+  const lengths = Array.from({ length: 200 }, () => abandonPrefix("x".repeat(40), rng).length);
+  assert.ok(Math.min(...lengths) <= 13 && Math.max(...lengths) >= 27, `prefix lengths ${Math.min(...lengths)}-${Math.max(...lengths)} do not spread over 30-70%`);
 });
 
 // --- Summary -----------------------------------------------------------------

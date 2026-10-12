@@ -352,6 +352,8 @@ export const ASSISTANT_MAX_CARDS_PER_PROMPT = 3;
 export const ASSISTANT_FOCUS_SHARE = 0.15;
 /** Chance one askAssistant runs a second thread (a new topic) after the first. */
 export const ASSISTANT_SECOND_THREAD_RATE = 0.25;
+/** Chance an abandoned assistant panel gets part of its first prompt typed before it is closed. */
+export const ASSISTANT_ABANDON_TYPED_RATE = 0.6;
 /** Chance New chat is clicked before a thread when the log already holds messages. */
 export const ASSISTANT_NEW_CHAT_RATE = 0.6;
 /** Turn caps per askAssistant and per session. */

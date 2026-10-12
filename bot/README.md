@@ -139,6 +139,7 @@ what they affect.
 | `ASSISTANT_FOCUS_SHARE` (0.15) | An assistant opener uses the day's focus cell instead of the archetype's intent mix (see "Assistant prompts"). | 0.05–0.3. 0 stops the daily focus cell, so rare cells get only their mix share. |
 | `ASSISTANT_SECOND_THREAD_RATE` (0.25) | One `askAssistant` starts a second topic after the first. | 0–0.5. |
 | `ASSISTANT_NEW_CHAT_RATE` (0.6) | `New chat` is clicked before a thread when the conversation already holds messages. | 0–1. |
+| `ASSISTANT_ABANDON_TYPED_RATE` (0.6) | An abandoned assistant panel gets 30–70% of its first prompt typed before it is closed (otherwise it is closed untouched). | 0–1. |
 | `INSIGHTS_SCROLL_RATE` (0.7) | An insights dwell pause is preceded by a scroll. | 0–1. |
 | `NEW_VISITOR_SHOW_PASSWORD_RATE` (0.35) | A signing-up visitor clicks "Show password". | 0–1. |
 | `NEW_VISITOR_CURRENCY_CHANGE_RATE` / `NEW_VISITOR_LOCALE_CHANGE_RATE` (0.6 each) | Workspace setup changes the currency/locale away from its default. | 0–1. |
@@ -512,6 +513,19 @@ already in flight when the cap runs out stops there: if it sent no turn it logs
 logs `askAssistant: run turn cap cut this action after <n> turn(s)` and still
 counts as performed. Both kinds count in the summary's "cut by the run turn
 cap", and the `run turn cap` line says whether the cap was reached.
+
+### Abandoning the panel
+
+`askAssistant` abandons like every other dialog: after the panel opens it rolls
+the archetype's `abandonRate` on the session RNG (power 0.10, regular 0.18,
+casual 0.30, explorer 0.45, churning 0.55, new visitor 0.30). On abandon it
+sends nothing. At `ASSISTANT_ABANDON_TYPED_RATE` it first types 30–70% of the
+planned first prompt key by key (never all of it; nothing for a prompt of 3
+characters or fewer), then closes the panel with `Escape` or its `Close`
+button (`ABANDON_VIA_ESCAPE_RATE`), and logs `abandoned:askAssistant`. The
+half-typed draft is dropped: the composer unmounts when the panel closes. The
+plan was drawn before the roll, so its turns still count against the session
+cap, and the prompt stream stays the same whether or not the user gave up.
 
 ### Reading the turn lines
 

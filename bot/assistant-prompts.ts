@@ -968,6 +968,13 @@ export function applyStyle(rendered: Part[], style: StyleProfile, knobs: StyleKn
   return { text, typing: [{ kind: "type", text }], typo: "none" };
 }
 
+/** What an abandoning user typed before giving up: 30-70% of the prompt, never all of it, nothing for 3 or fewer characters. */
+export function abandonPrefix(text: string, rng: Rng): string {
+  if (text.length <= 3) return "";
+  const length = Math.min(text.length - 1, Math.max(3, Math.round((0.3 + rng.next() * 0.4) * text.length)));
+  return text.slice(0, length);
+}
+
 export type TurnKind = "opener" | `followup:${FollowUpKind}`;
 
 export interface Turn {
