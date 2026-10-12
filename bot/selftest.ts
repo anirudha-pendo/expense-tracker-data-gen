@@ -1171,14 +1171,16 @@ check("the turn log line has the exact req 20 shape", () => {
   const line = formatTurnLine(1, 3, turn, ["getSpendingSummary", "findTransactions"], "match");
   assert.match(
     line,
-    /^askAssistant: turn 1\/3 intent=\w+ shape=\w+ scope=(valid|invalid:\w+) period=[\w-]+ kind=(opener|followup:\w+) expect=[\w|]+ got=\[getSpendingSummary,findTransactions\] verdict=match text=".+"$/,
+    /^askAssistant: turn 1\/3 intent=\w+ shape=\w+ scope=(valid|invalid:\w+) period=[\w-]+ kind=(opener|followup:\w+) expect=[\w|]+ got=\[getSpendingSummary,findTransactions\] verdict=match send=(enter|click) text=".+"$/,
   );
-  assert.ok(line.endsWith(`text="${turn.text}"`));
+  assert.ok(line.endsWith(` send=${turn.send} text="${turn.text}"`));
+  assert.ok(formatTurnLine(1, 1, { ...turn, send: "click" }, [], "match").includes(" verdict=match send=click text="));
+  assert.ok(formatTurnLine(1, 1, { ...turn, send: "enter" }, [], "match").includes(" verdict=match send=enter text="));
   const anyOf = formatTurnLine(2, 2, { ...turn, expect: { must: ["addTransaction", "updateTransaction"], forbid: [] } }, [], "miss");
   assert.ok(anyOf.includes(" expect=addTransaction|updateTransaction got=[] verdict=miss "), anyOf);
   assert.ok(formatTurnLine(1, 1, { ...turn, expect: NO_TOOLS }, [], "match").includes(" expect=none "));
   assert.ok(formatTurnLine(1, 1, turn, ["addTransaction"], "error").includes(" got=[addTransaction] verdict=error "));
-  assert.ok(formatTurnLine(1, 1, turn, null, "error").includes(" got=? verdict=error text="));
+  assert.ok(formatTurnLine(1, 1, turn, null, "error").includes(` got=? verdict=error send=${turn.send} text=`));
 });
 
 check("summarizeAssistant counts in-scope matches over valid, answered turns only", () => {
@@ -1502,6 +1504,17 @@ check("the bot itself passes the pure-usage scan (AC14)", () => {
   assert.ok(READ_PENDO_STATE(fileText(files, "run.ts")).includes("waitForFunction("), "readPendoState lost its page script, so the region checks prove nothing");
   assert.ok(PREPARE_PAGE(fileText(files, "actions.ts")).includes("addInitScript("), "preparePage moved, so the addInitScript check proves nothing");
   assert.ok(ASSISTANT_SECTION(fileText(files, "actions.ts")).includes("pressSequentially("), "the actions.ts assistant section moved, so the .fill( check proves nothing");
+});
+
+check("each archetype clicks Send at its sendClick rate within 3 points over 3,000 turns (AD1)", () => {
+  for (const archetype of ARCHETYPE_LIST) {
+    const members = personasOf(archetype);
+    const turns: Turn[] = [];
+    for (let i = 0; turns.length < 3000; i++) turns.push(...sessionTurns(plannerFor(members[i % members.length], `send:${archetype}:${i}`)));
+    const share = turns.filter((turn) => turn.send === "click").length / turns.length;
+    const target = ARCHETYPE_STYLE[archetype].sendClick;
+    assert.ok(Math.abs(share - target) <= 0.03, `${archetype} clicks Send on ${(share * 100).toFixed(1)}% vs ${target * 100}%`);
+  }
 });
 
 // --- Summary -----------------------------------------------------------------

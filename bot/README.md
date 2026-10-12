@@ -505,11 +505,13 @@ cap", and the `run turn cap` line says whether the cap was reached.
 One line per turn:
 
 ```
-askAssistant: turn 1/1 intent=addTransaction shape=full scope=valid period=- kind=opener expect=addTransaction got=[addTransaction] verdict=match text="hey can you add 36 for groceries? put it under food & dining"
+askAssistant: turn 1/1 intent=addTransaction shape=full scope=valid period=- kind=opener expect=addTransaction got=[addTransaction] verdict=match send=enter text="hey can you add 36 for groceries? put it under food & dining"
 ```
 
 `got=` lists the `data-tool` names of the tool rows that appeared in the panel
 after this turn was sent — read from the page, never from the network.
+`send=` says how the turn was sent: `enter` (the Enter key) or `click` (the
+`Send` button), drawn per turn at the archetype's `sendClick` rate.
 `verdict` is `match`, `miss` (no required tool), `overreach` (a forbidden tool
 ran; beats miss) or `unavailable` (an alert ended the turn). A turn that throws
 (a reply timeout, say) still logs its line, with `verdict=error` and `got=?`

@@ -1482,7 +1482,7 @@ export function formatTurnLine(index: number, total: number, turn: Turn, tools: 
   const got = tools === null ? "?" : `[${tools.join(",")}]`;
   return (
     `askAssistant: turn ${index}/${total} intent=${turn.intent} shape=${turn.shape} scope=${turn.scopeLabel} ` +
-    `period=${turn.period} kind=${turn.kind} expect=${expect} got=${got} verdict=${result} text="${turn.text}"`
+    `period=${turn.period} kind=${turn.kind} expect=${expect} got=${got} verdict=${result} send=${turn.send} text="${turn.text}"`
   );
 }
 
