@@ -411,9 +411,11 @@ The bot's `askAssistant` reaches all four on a deployment that serves
 `/api/chat`. Every sent turn is a `prompt` and every finished reply an
 `agent_response`. When a reply proposes a write, the bot clicks `Confirm`
 (`ASSISTANT_CONFIRM_RATE`, 0.75) or `Cancel`, so `assistant_write_resolved`
-carries both `confirmed` and `cancelled`. A failed request (the alert the bot
-logs as `skipped:askAssistant (assistant unavailable: …)`) is an
-`assistant_error`. `New chat` sends no event of its own: it starts a new chat,
+carries both `confirmed` and `cancelled`. The bot logs every panel alert as
+`skipped:askAssistant (assistant unavailable: …)`, but only an alert from a
+failed chat request (`onError`, including the lock it may set) comes with an
+`assistant_error`. The step-limit, offline and categories-load alerts send no
+event. `New chat` sends no event of its own: it starts a new chat,
 so the next `prompt` carries a new `conversationId`.
 
 ### Which of those the bot's walk actually reaches
