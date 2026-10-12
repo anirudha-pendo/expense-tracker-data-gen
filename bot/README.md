@@ -394,6 +394,7 @@ EU      ...
 US      ...
 
 assistant turns   <count> (<count> unavailable, <count> action(s) cut by the run turn cap)
+run turn cap      <reached|not reached> (60)
 in-scope match    <match>/<judged> (<pct>%)
 
 intent  turns  match  miss  overreach  unavailable
@@ -481,10 +482,18 @@ Before a thread, when the log already holds messages, it clicks `New chat` at
 per thread. A `clarify/ambiguousTarget` opener either deletes ("delete my
 coffee") or names the new amount ("change my coffee to 4.50"), so its
 `pickCandidate` follow-up ("the one on Oct 3") completes the write: it must
-call `deleteTransaction` or `updateTransaction` respectively. Caps: `ASSISTANT_TURNS_PER_ACTION_MAX` per action,
-`ASSISTANT_TURNS_PER_SESSION_MAX` per session, `ASSISTANT_TURNS_PER_RUN_MAX` per
-run (an in-memory counter; reaching it logs `skipped:askAssistant (run turn
-cap)` and stops the assistant for the rest of the run).
+call `deleteTransaction` or `updateTransaction` respectively.
+
+Caps: `ASSISTANT_TURNS_PER_ACTION_MAX` per action,
+`ASSISTANT_TURNS_PER_SESSION_MAX` per session, and `ASSISTANT_TURNS_PER_RUN_MAX`
+per run (an in-memory counter shared by every session of the run). The turn
+that uses the run's last slot logs `askAssistant: run turn cap reached (60)`,
+and from then on `askAssistant` has weight 0 for the rest of the run. An action
+already in flight when the cap runs out stops there: if it sent no turn it logs
+`skipped:askAssistant (run turn cap)` and counts as a skip; if it sent some it
+logs `askAssistant: run turn cap cut this action after <n> turn(s)` and still
+counts as performed. Both kinds count in the summary's "cut by the run turn
+cap", and the `run turn cap` line says whether the cap was reached.
 
 ### Reading the turn lines
 
@@ -504,6 +513,7 @@ the model and never change the exit code.
 
 ```
 assistant turns   <turns> (<n> unavailable, <n> action(s) cut by the run turn cap)
+run turn cap      <reached|not reached> (60)
 in-scope match    <match>/<judged> (<pct>%)
 
 intent            turns  match  miss  overreach  unavailable

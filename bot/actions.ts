@@ -113,6 +113,8 @@ export interface AssistantSessionLog {
   turns: TurnRecord[];
   /** askAssistant actions cut short by the run turn cap. */
   capSkips: number;
+  /** This session sent the run's last allowed turn. */
+  capReached: boolean;
 }
 
 export interface Action {
@@ -1179,7 +1181,7 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
 // not_configured and an exhausted spend limit will not clear within a run, so stop knocking.
 let assistantOffForRun = false;
 // One process runs every session of a run, so this counts the whole run and resets with the next one.
-let assistantRunTurns = 0;
+const assistantRunCap: RunTurnCap = { used: 0, max: ASSISTANT_TURNS_PER_RUN_MAX };
 const RUN_ENDING_ALERTS = [errorCopy("not_configured"), errorCopy("provider_quota_exhausted")];
 
 function assistantPanel(page: Page): Locator {
@@ -1221,8 +1223,25 @@ async function settleAssistantReply(page: Page, ctx: SessionCtx, panel: Locator)
   throw new Error(`the assistant proposed more than ${ASSISTANT_MAX_CARDS_PER_PROMPT} confirm cards for one prompt`);
 }
 
+export interface RunTurnCap {
+  used: number;
+  max: number;
+}
+
+/** Books one turn against the run cap: "last" when it uses the final slot, "refused" once none are left. */
+export function takeRunTurn(cap: RunTurnCap): "sent" | "last" | "refused" {
+  if (cap.used >= cap.max) return "refused";
+  cap.used += 1;
+  return cap.used === cap.max ? "last" : "sent";
+}
+
+/** Only an action that sent nothing is a skip; one that already typed turns still counts as performed. */
+export function runCapCutLine(sent: number): string {
+  return sent === 0 ? "skipped:askAssistant (run turn cap)" : `askAssistant: run turn cap cut this action after ${sent} turn(s)`;
+}
+
 function assistantAvailable(ctx: SessionCtx): boolean {
-  return !assistantOffForRun && !ctx.assistantOff && assistantRunTurns < ASSISTANT_TURNS_PER_RUN_MAX && ctx.assistant.turnsLeft() > 0;
+  return !assistantOffForRun && !ctx.assistantOff && assistantRunCap.used < assistantRunCap.max && ctx.assistant.turnsLeft() > 0;
 }
 
 /** Real keystrokes only: a corrected typo is typed, backspaced and retyped. */
@@ -1287,12 +1306,16 @@ async function askThreads(page: Page, ctx: SessionCtx, panel: Locator, threads: 
   for (const thread of threads) {
     if (thread.newChat && (await messages.count()) > 0) await startNewChat(panel, ctx);
     for (const turn of thread.turns) {
-      if (assistantRunTurns >= ASSISTANT_TURNS_PER_RUN_MAX) {
+      const taken = takeRunTurn(assistantRunCap);
+      if (taken === "refused") {
         ctx.assistantLog.capSkips += 1;
-        ctx.log("skipped:askAssistant (run turn cap)");
+        ctx.log(runCapCutLine(index));
         return;
       }
-      assistantRunTurns += 1;
+      if (taken === "last") {
+        ctx.assistantLog.capReached = true;
+        ctx.log(`askAssistant: run turn cap reached (${assistantRunCap.max})`);
+      }
       index += 1;
       if ((await askTurn(page, ctx, panel, turn, index, total)) === "unavailable") return;
       await think(page, ctx);

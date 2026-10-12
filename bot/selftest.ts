@@ -32,7 +32,7 @@ import {
   type Persona,
   type SeedData,
 } from "./personas";
-import { planWorkspaceRename } from "./actions";
+import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
 import { comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
@@ -1139,19 +1139,32 @@ check("the run summary's assistant block totals every session and never prints N
   assert.deepStrictEqual(formatAssistantBlock([]), [
     "",
     "assistant turns   0 (0 unavailable, 0 action(s) cut by the run turn cap)",
+    "run turn cap      not reached (60)",
     "in-scope match    0/0 (n/a)",
   ]);
   const lines = formatAssistantBlock([
-    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "match" }, { intent: "offTopic", scopeLabel: "valid", verdict: "match" }], capSkips: 1 },
-    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "miss" }, { intent: "addTransaction", scopeLabel: "valid", verdict: "unavailable" }], capSkips: 0 },
+    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "match" }, { intent: "offTopic", scopeLabel: "valid", verdict: "match" }], capSkips: 1, capReached: false },
+    { turns: [{ intent: "spendSummary", scopeLabel: "valid", verdict: "miss" }, { intent: "addTransaction", scopeLabel: "valid", verdict: "unavailable" }], capSkips: 0, capReached: true },
   ]);
   assert.strictEqual(lines[1], "assistant turns   4 (1 unavailable, 1 action(s) cut by the run turn cap)");
-  assert.strictEqual(lines[2], "in-scope match    1/2 (50%)");
-  const table = lines.slice(4).join("\n").split("\n");
+  assert.strictEqual(lines[2], "run turn cap      reached (60)");
+  assert.strictEqual(lines[3], "in-scope match    1/2 (50%)");
+  const table = lines.slice(5).join("\n").split("\n");
   assert.match(table[0], /^intent\s+turns\s+match\s+miss\s+overreach\s+unavailable$/);
   assert.match(table[2], /^spendSummary\s+2\s+1\s+1\s+0\s+0$/);
   assert.match(table[3], /^addTransaction\s+1\s+0\s+0\s+0\s+1$/);
   assert.match(table[4], /^offTopic\s+1\s+1\s+0\s+0\s+0$/);
+});
+
+check("the run turn cap announces its last slot, then refuses; only an action that sent nothing is a skip", () => {
+  const cap = { used: 58, max: 60 };
+  assert.deepStrictEqual([takeRunTurn(cap), takeRunTurn(cap), takeRunTurn(cap), takeRunTurn(cap)], ["sent", "last", "refused", "refused"]);
+  assert.strictEqual(cap.used, 60);
+  assert.deepStrictEqual([takeRunTurn({ used: 0, max: 1 })], ["last"]);
+  assert.strictEqual(takeRunTurn({ used: 0, max: 0 }), "refused");
+  assert.strictEqual(runCapCutLine(0), "skipped:askAssistant (run turn cap)");
+  assert.strictEqual(runCapCutLine(2), "askAssistant: run turn cap cut this action after 2 turn(s)");
+  assert.ok(!runCapCutLine(1).startsWith("skipped:"), "an action that sent a turn would drop out of actions performed");
 });
 
 check("only Pendo event beacons are counted (RF5)", () => {

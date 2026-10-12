@@ -45,6 +45,7 @@ import { chromium, errors, type Browser, type BrowserContext, type Page } from "
 import {
   APP_URL,
   ASSISTANT_FOCUS_SHARE,
+  ASSISTANT_TURNS_PER_RUN_MAX,
   FAILURE_DIR,
   HEADLESS,
   MAX_ACTION_FAILURE_RATE,
@@ -775,7 +776,7 @@ async function runOneSession(
       planNow,
       focusShare: ASSISTANT_FOCUS_SHARE,
     }),
-    assistantLog: { turns: [], capSkips: 0 },
+    assistantLog: { turns: [], capSkips: 0, capReached: false },
   };
   const pendo: SessionPendo = { reading: { status: "unchecked" }, beacons: 0 };
 
@@ -874,7 +875,7 @@ async function runPool(
               error: firstLine(err),
               url: null,
               screenshot: null,
-              assistant: { turns: [], capSkips: 0 },
+              assistant: { turns: [], capSkips: 0, capReached: false },
               pendo: { reading: { status: "unchecked" }, beacons: 0 },
             };
           }
@@ -899,6 +900,7 @@ export function formatAssistantBlock(logs: readonly AssistantSessionLog[]): stri
   const lines = [
     "",
     `assistant turns   ${summary.turns} (${summary.unavailable} unavailable, ${summary.capSkips} action(s) cut by the run turn cap)`,
+    `run turn cap      ${logs.some((log) => log.capReached) ? "reached" : "not reached"} (${ASSISTANT_TURNS_PER_RUN_MAX})`,
     `in-scope match    ${formatMatchRate(summary.inScopeMatch, summary.inScopeJudged)}`,
   ];
   if (summary.rows.length > 0) {
