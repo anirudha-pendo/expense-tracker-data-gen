@@ -336,12 +336,18 @@ Once you know that real number, two examples of what to do with it:
 
 Measured (40 scheduled runs, 6–11 October 2026): 1.0–4.6 minutes per run,
 2.65 on average, so about 240 × 3 ≈ 750 billed minutes a month. Typing the
-assistant's prompts key by key adds roughly 2–7 seconds per turn (about 32
-characters on average at 60–220 ms each) and about 1.8 turns per `askAssistant`; on a weekday
-run that is about 1 minute of extra session time spread over
-`MAX_CONCURRENCY` browsers, so expect roughly +0.2 to +1 minute per run and
-about 800–1,000 billed minutes a month (each job rounds up to a whole minute). If that ever binds, the typing speeds are the
-`charDelayMs` ranges in `ARCHETYPE_STYLE` (`assistant-prompts.ts`).
+assistant's prompts key by key adds roughly 2–7 seconds per turn (about 33
+characters on average at 60–220 ms each). Turns sent per `askAssistant`,
+after abandonment, are about 2.7 for power, 2.2 regular, 1.3 casual, 0.8
+explorer and 0.6 churning: longer chats for heavy users, fewer for the rest,
+so a weekday run sends about 15 turns, roughly one more than with the old
+fixed follow-up cap. Each extra turn is about 15 seconds (typing, reply,
+pause), spread over `MAX_CONCURRENCY` browsers, so expect roughly +0.2 to +1
+minute per run and about 850–1,000 billed minutes a month (each job rounds up
+to a whole minute). The ceiling is `ASSISTANT_TURNS_PER_RUN_MAX`: a run that
+sends all 60 turns adds about 2 minutes, about 1,300 minutes a month if every
+run did. If that ever binds, lower that cap or the `charDelayMs` ranges in
+`ARCHETYPE_STYLE` (`assistant-prompts.ts`).
 
 Also watch the job's `timeout-minutes: 20` ceiling in the workflow — raising
 `BASE_SESSIONS_PER_RUN` too far can make a single run too slow to finish
@@ -453,6 +459,13 @@ panel shows.
 | unclear | `vague`: none · `clarify`: missingAmount, missingWhat, ambiguousTarget | no writes |
 | refuse / off-path | `adviceRefusal`: none · `unsafeRefusal`: bulkDelete, revealPrompt, otherWorkspace · `offTopic`: none · `meta`: greeting, capabilities, feedback | no tools at all |
 
+Every in-scope cell has at least five wordings per register (15 per cell),
+each `clarify` cell 12, `vague` 24, and every follow-up kind 12: 400 opener
+and 84 follow-up templates. Wordings in one cell must differ (the selftest
+caps their word overlap), and the template is picked uniformly within the
+drawn register on the prompt stream, so one persona asking the same question
+sees many phrasings.
+
 Each archetype has its own intent mix, phrasing register (terse / plain /
 chatty), lowercase and punctuation habits, typo rates, typing speed, Send-click
 rate, follow-up chance and invalid-scope rate — the `INTENT_MIX` and
@@ -490,6 +503,14 @@ Before a thread, when the log already holds messages, it clicks `New chat` at
 |---|---|---|---|---|---|
 | `followUp` (chance after each turn) | 0.75 | 0.65 | 0.35 | 0.20 | 0.10 |
 | `followUpsMax` (per thread) | 5 | 4 | 2 | 1 | 1 |
+
+Measured over 10,000 first actions per archetype (selftest AD5), turns per
+thread:
+
+| | power | regular | casual | explorer | churning |
+|---|---|---|---|---|---|
+| Mean turns per thread | 2.48 | 2.12 | 1.43 | 1.19 | 1.10 |
+| Threads of one turn | 26% | 36% | 65% | 81% | 90% |
 
 New visitors use the `explorer` row. The kind is drawn uniformly from those
 that fit the previous turn. `thanks` ends a thread. `nextQuestion` fits after
