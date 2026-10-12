@@ -70,6 +70,7 @@ import {
   type AssistantPlanner,
   type Expect,
   type Intent,
+  type Part,
   type Period,
   type PlannerInput,
   type PromptData,
@@ -719,6 +720,39 @@ const ALL_SLOT_VALUES: SlotValues = {
   candidate: "Sep 3",
 };
 
+/**
+ * Each slot must appear verbatim (case aside) at its own place: a literal part may grow or shrink by one
+ * letter (one typo) and the last literal may lose its end punctuation, but nothing may absorb a slot's change.
+ */
+function slotsInPlace(parts: readonly Part[], text: string): boolean {
+  const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = parts
+    .map((part, i) => {
+      if (part.slot) return escape(part.text);
+      const min = i === parts.length - 1 ? 0 : Math.max(0, part.text.length - 1);
+      return `[\\s\\S]{${min},${part.text.length + 1}}`;
+    })
+    .join("");
+  return new RegExp(`^${pattern}$`, "i").test(text);
+}
+
+check("slotsInPlace accepts a typo in a literal and rejects one in a slot or a moved slot", () => {
+  const parts: Part[] = [
+    { text: "add ", slot: false },
+    { text: "coffee", slot: true },
+    { text: " to ", slot: false },
+    { text: "Food & Dining", slot: true },
+    { text: " please.", slot: false },
+  ];
+  assert.ok(slotsInPlace(parts, "add coffee to Food & Dining please."));
+  assert.ok(slotsInPlace(parts, "add coffee to food & dining pleese"));
+  assert.ok(slotsInPlace(parts, "ad coffee to Food & Dining please."));
+  assert.ok(!slotsInPlace(parts, "add cofefe to Food & Dining please."));
+  assert.ok(!slotsInPlace(parts, "add coffee to Food & Dinning please."));
+  assert.ok(!slotsInPlace(parts, "add coffee coffee to Food & Dining please."));
+  assert.ok(!slotsInPlace(parts, "coffee to Food & Dining please."));
+});
+
 function typedResult(typing: readonly TypingStep[]): string {
   let text = "";
   for (const step of typing) text = step.kind === "type" ? text + step.text : text.slice(0, -1);
@@ -767,10 +801,7 @@ check("styled text replays exactly from its keystrokes, and a typo never touches
         const parts = renderTemplate(template, ALL_SLOT_VALUES, rng);
         const styled = applyStyle(parts, style, knobs, rng);
         assert.strictEqual(typedResult(styled.typing), styled.text, `keystrokes do not replay "${styled.text}"`);
-        for (const part of parts.filter((p) => p.slot)) {
-          const value = style.lowercase ? part.text.toLowerCase() : part.text;
-          assert.ok(styled.text.includes(value), `typo inside slot "${value}" in "${styled.text}"`);
-        }
+        assert.ok(slotsInPlace(parts, styled.text), `a slot moved or was misspelt in "${styled.text}"`);
         const hasLongWord = parts.some((p) => !p.slot && /[A-Za-z]{4,}/.test(p.text));
         if (!hasLongWord) assert.strictEqual(styled.typo, "none", `typo without a 4-letter literal word in "${styled.text}"`);
         if (styled.typo === "corrected") {
@@ -1067,9 +1098,7 @@ check("register, typo and slot rules hold per archetype, and style is stable per
       assert.ok(kept >= 0.1, `casual kept-typo rate ${kept}`);
     }
     for (const turn of turns) {
-      for (const value of turn.slotValues) {
-        assert.ok(turn.text.toLowerCase().includes(value.toLowerCase()), `typo inside slot "${value}" in "${turn.text}"`);
-      }
+      assert.ok(slotsInPlace(turn.rendered, turn.text), `a slot moved or was misspelt in "${turn.text}"`);
       assert.strictEqual(typedResult(turn.typing), turn.text, `keystrokes do not replay "${turn.text}"`);
       const { min, max } = ARCHETYPE_STYLE[archetype].charDelayMs;
       assert.ok(turn.charDelayMs >= min && turn.charDelayMs <= max, `${archetype} delay ${turn.charDelayMs}`);

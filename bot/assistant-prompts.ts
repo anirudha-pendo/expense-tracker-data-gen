@@ -978,8 +978,8 @@ export interface Turn {
   text: string;
   typing: TypingStep[];
   typo: Typo;
-  /** Rendered slot values before the lowercase habit, so a check can prove no typo landed in one. */
-  slotValues: string[];
+  /** The template as rendered, before style, so a check can prove every slot kept its place and spelling. */
+  rendered: Part[];
   charDelayMs: number;
   send: "enter" | "click";
 }
@@ -1211,7 +1211,7 @@ function slotValues(scope: Scope, data: PromptData, rng: Rng): SlotValues {
   return values;
 }
 
-type TurnBase = Omit<Turn, "text" | "typing" | "typo" | "slotValues" | "charDelayMs" | "send" | "period">;
+type TurnBase = Omit<Turn, "text" | "typing" | "typo" | "rendered" | "charDelayMs" | "send" | "period">;
 
 function finishTurn(gen: Gen, base: TurnBase, template: string): Turn {
   const parts = renderTemplate(template, slotValues(base.scope, gen.data, gen.rng), gen.rng);
@@ -1221,7 +1221,7 @@ function finishTurn(gen: Gen, base: TurnBase, template: string): Turn {
     ...base,
     ...styled,
     period: base.scope.period === undefined ? "-" : base.scope.period.kind,
-    slotValues: parts.filter((part) => part.slot).map((part) => part.text),
+    rendered: parts,
     charDelayMs: gen.rng.int(gen.knobs.charDelayMs.min, gen.knobs.charDelayMs.max),
     send: gen.rng.chance(gen.knobs.sendClick) ? "click" : "enter",
   };
