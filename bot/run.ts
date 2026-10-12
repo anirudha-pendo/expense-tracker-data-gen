@@ -396,6 +396,7 @@ export type IdCheck = "match" | "mismatch";
 export type PendoReading =
   | { status: "unchecked" }
   | { status: "not-ready" }
+  | { status: "failed"; reason: string }
   | { status: "ready"; visitor: IdCheck; account: IdCheck };
 
 export interface SessionPendo {
@@ -403,7 +404,7 @@ export interface SessionPendo {
   beacons: number;
 }
 
-interface PendoIds {
+export interface PendoIds {
   visitorId: string;
   accountId: string;
 }
@@ -423,6 +424,7 @@ export function comparePendoIds(actual: PendoIds, expected: PendoIds | null): { 
 export function formatPendoReading(reading: PendoReading): string {
   if (reading.status === "ready") return `pendo: ready visitor=${reading.visitor} account=${reading.account}`;
   if (reading.status === "not-ready") return `pendo: not ready after ${PENDO_READY_TIMEOUT_MS}ms (data-quality warning)`;
+  if (reading.status === "failed") return `pendo: check failed (${reading.reason}) (data-quality warning)`;
   return "pendo: not checked";
 }
 
@@ -464,12 +466,18 @@ type PendoWindow = Window & {
   pendo?: { isReady?: () => boolean; getVisitorId?: () => unknown; getAccountId?: () => unknown };
 };
 
-async function checkPendo(page: Page, seed: SeedData | null, log: (msg: string) => void): Promise<PendoReading> {
-  const state = await readPendoState(page);
-  const reading: PendoReading =
-    state === "not-ready"
-      ? { status: "not-ready" }
-      : { status: "ready", ...comparePendoIds(state, seed === null ? null : { visitorId: seed.user.id, accountId: seed.workspace.id }) };
+/** Never throws: a Pendo problem is a data-quality warning and must not fail the session or the run. */
+export async function checkPendo(read: () => Promise<PendoIds | "not-ready">, seed: SeedData | null, log: (msg: string) => void): Promise<PendoReading> {
+  let reading: PendoReading;
+  try {
+    const state = await read();
+    reading =
+      state === "not-ready"
+        ? { status: "not-ready" }
+        : { status: "ready", ...comparePendoIds(state, seed === null ? null : { visitorId: seed.user.id, accountId: seed.workspace.id }) };
+  } catch (err) {
+    reading = { status: "failed", reason: firstLine(err) };
+  }
   log(formatPendoReading(reading));
   return reading;
 }
@@ -664,7 +672,7 @@ async function driveSession(
     // Writes the persona's history straight into IndexedDB and comes back on
     // a rendered dashboard, so the analytics agent sees a returning user.
     await seedPersona(page, planned.persona, seed);
-    pendo.reading = await checkPendo(page, seed, ctx.log);
+    pendo.reading = await checkPendo(() => readPendoState(page), seed, ctx.log);
     const archetype = ARCHETYPES[planned.persona.archetype];
     const steps = ctx.rng.int(archetype.sessionLengthMin, archetype.sessionLengthMax);
     ctx.log(`walking ${steps} step(s)`);
@@ -673,7 +681,7 @@ async function driveSession(
   }
 
   await signUpNewVisitor(page, ctx);
-  pendo.reading = await checkPendo(page, null, ctx.log);
+  pendo.reading = await checkPendo(() => readPendoState(page), null, ctx.log);
   // First act of a fresh account is to put something in it. That is what a
   // real first session looks like, and it leaves the remaining steps a
   // workspace with data rather than an empty one.

@@ -528,7 +528,9 @@ an answer. `pendo ready` is the once-per-session read-only check: after
 seeding (or after workspace setup for a new visitor) the bot waits up to
 `PENDO_READY_TIMEOUT_MS` for `pendo.isReady()`, then reads `getVisitorId()` and
 `getAccountId()`; a returning persona must match its seeded `user.id` and
-`workspace.id`. `pendo beacons` counts requests to a host containing `pendo`
+`workspace.id`. If the read itself throws (say the page is still navigating),
+the session logs `pendo: check failed (<reason>) (data-quality warning)` and
+carries on; it is never a session failure. `pendo beacons` counts requests to a host containing `pendo`
 whose path contains `/data/ptm.gif/` — Pendo's event beacon, one per click or
 page view (measured October 2026; the agent's other `/data/` calls —
 `guide.json`, `guide.gif`, `segmentflag.json`, `recordingconf`, `devlog`,

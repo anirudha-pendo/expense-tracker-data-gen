@@ -33,7 +33,7 @@ import {
   type SeedData,
 } from "./personas";
 import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
-import { comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
+import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
   ARCHETYPE_STYLE,
@@ -1195,6 +1195,30 @@ check("Pendo ids: returning sessions must match the seed, new visitors only need
   assert.strictEqual(formatBeaconLine(12, 5), "pendo: 12 beacons");
   assert.strictEqual(formatBeaconLine(0, 0), "pendo: 0 beacons");
   assert.strictEqual(formatBeaconLine(0, 3), "pendo: 0 beacons (data-quality warning: 3 action(s) ran)");
+});
+
+const pendoCheckLines: string[] = [];
+const pendoCheckReadings = [
+  await checkPendo(async () => { throw new Error("page.evaluate: Execution context was destroyed\n    at stack"); }, null, (msg) => pendoCheckLines.push(msg)),
+  await checkPendo(() => Promise.reject("not an Error"), null, (msg) => pendoCheckLines.push(msg)),
+  await checkPendo(async () => "not-ready", null, (msg) => pendoCheckLines.push(msg)),
+  await checkPendo(async () => ({ visitorId: "fresh-user", accountId: "fresh-ws" }), null, (msg) => pendoCheckLines.push(msg)),
+];
+
+check("a Pendo read that throws is logged as a data-quality warning, never rethrown (R4)", () => {
+  assert.deepStrictEqual(pendoCheckReadings, [
+    { status: "failed", reason: "page.evaluate: Execution context was destroyed" },
+    { status: "failed", reason: "not an Error" },
+    { status: "not-ready" },
+    { status: "ready", visitor: "match", account: "match" },
+  ]);
+  assert.deepStrictEqual(pendoCheckLines, [
+    "pendo: check failed (page.evaluate: Execution context was destroyed) (data-quality warning)",
+    "pendo: check failed (not an Error) (data-quality warning)",
+    "pendo: not ready after 15000ms (data-quality warning)",
+    "pendo: ready visitor=match account=match",
+  ]);
+  assert.deepStrictEqual(formatPendoBlock([{ reading: pendoCheckReadings[0], beacons: 3 }]).slice(1), ["pendo ready       0/1 session(s), 0 with an id mismatch", "pendo beacons     3 total, 0 session(s) with none"]);
 });
 
 check("the run summary's pendo block counts ready sessions, mismatches, beacons and silent sessions", () => {
