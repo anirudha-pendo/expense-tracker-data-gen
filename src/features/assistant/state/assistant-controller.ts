@@ -1,7 +1,7 @@
 import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { Category } from "@/types";
-import { trackAssistantEvent } from "@/lib/analytics";
+import { trackAssistantError, trackAssistantEvent, trackAssistantWrite } from "@/lib/analytics";
 import { localIsoDate } from "@/lib/dates";
 import { parseAssistantError } from "../contract/errors";
 import { ASSISTANT_LIMITS } from "../contract/limits";
@@ -188,7 +188,10 @@ export class AssistantController {
           return { body: { id, messages: recent, context } };
         },
       }),
-      onError: (error) => this.reportError(error),
+      onError: (error) => {
+        this.reportError(error);
+        trackAssistantError({ conversationId: chat.id, code: parseAssistantError(error) });
+      },
       onFinish: ({ message, isError, isAbort, isDisconnect }) => {
         if (isError || isAbort || isDisconnect || message.role !== "assistant") return;
         const content = message.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
@@ -237,8 +240,15 @@ export class AssistantController {
     this.setResolving(chat, toolCallId, true);
     try {
       const id = await applyTransactionProposal(workspaceId, entry.proposal);
+      trackAssistantWrite({ conversationId: chat.id, tool: entry.tool, outcome: "confirmed" });
       await chat.addToolOutput({ tool: entry.tool, toolCallId, output: { status: "confirmed", id } });
     } catch (error) {
+      trackAssistantWrite({
+        conversationId: chat.id,
+        tool: entry.tool,
+        outcome: "failed",
+        reason: error instanceof StaleWriteError ? "stale" : "save_failed",
+      });
       if (!(error instanceof StaleWriteError)) console.error("assistant: write failed", error);
       const errorText = error instanceof StaleWriteError ? error.message : "The change could not be saved.";
       await chat.addToolOutput({ tool: entry.tool, toolCallId, state: "output-error", errorText });
@@ -251,6 +261,7 @@ export class AssistantController {
     const entry = this.snapshot.proposals.get(toolCallId);
     if (entry === undefined || this.claimed.has(toolCallId) || !this.isPending(toolCallId)) return;
     this.claimed.add(toolCallId);
+    trackAssistantWrite({ conversationId: this.snapshot.chat.id, tool: entry.tool, outcome: "cancelled", reason });
     await this.snapshot.chat.addToolOutput({ tool: entry.tool, toolCallId, output: { status: "cancelled", reason } });
   }
 
@@ -273,7 +284,7 @@ export class AssistantController {
     if (chat !== this.snapshot.chat) return;
     trackAssistantEvent("prompt", {
       conversationId: chat.id,
-      messageId: `prompt-${Date.now()}`,
+      messageId: `prompt-${crypto.randomUUID()}`,
       content: text,
       modelUsed: ASSISTANT_MODEL_ID,
     });

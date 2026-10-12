@@ -395,6 +395,22 @@ Two fields are conditional:
 | Display name changed (Settings → Profile) | `updateOptions` | Yes, when the user has a workspace. The visitor's `full_name` moved; the account block is unchanged and re-sent as-is |
 | Sign-out (`useAuth.signOut`) | `clearSession()`, guarded with `typeof` | — |
 
+### Assistant events
+
+Also built in `src/lib/analytics.ts`, sent from `AssistantController`. These are
+events, not identity: no visitor or account field moves.
+
+| Moment | Call |
+|---|---|
+| User sends a prompt (`send`) | `trackAgent("prompt")`, with a random `prompt-<uuid>` message id |
+| Assistant turn finishes without error, abort or disconnect (`onFinish`) | `trackAgent("agent_response")`, with `toolsUsed` |
+| A proposed write is confirmed, cancelled or fails (`confirm` / `cancel`) | `track("assistant_write_resolved")` with `tool`, `outcome` and, when there is one, `reason` |
+| A chat request errors (`onError`) | `track("assistant_error")` with the error `code` |
+
+The bot's `askAssistant` reaches the first two on a deployment that serves
+`/api/chat`; write confirmation or cancellation is reached only if the bot
+clicks a confirm card.
+
 ### Which of those the bot's walk actually reaches
 
 Four of the seven, on an ordinary run:
