@@ -407,9 +407,16 @@ events, not identity: no visitor or account field moves.
 | A proposed write is confirmed, cancelled or fails (`confirm` / `cancel`) | `track("assistant_write_resolved")` with `tool`, `outcome` and, when there is one, `reason` |
 | A chat request errors (`onError`) | `track("assistant_error")` with the error `code` |
 
-The bot's `askAssistant` reaches the first two on a deployment that serves
-`/api/chat`; write confirmation or cancellation is reached only if the bot
-clicks a confirm card.
+The bot's `askAssistant` reaches all four on a deployment that serves
+`/api/chat`. Every sent turn is a `prompt` and every finished reply an
+`agent_response`. When a reply proposes a write, the bot clicks `Confirm`
+(`ASSISTANT_CONFIRM_RATE`, 0.75) or `Cancel`, so `assistant_write_resolved`
+carries both `confirmed` and `cancelled`. The bot logs every panel alert as
+`skipped:askAssistant (assistant unavailable: …)`, but only an alert from a
+failed chat request (`onError`, including the lock it may set) comes with an
+`assistant_error`. The step-limit, offline and categories-load alerts send no
+event. `New chat` sends no event of its own: it starts a new chat,
+so the next `prompt` carries a new `conversationId`.
 
 ### Which of those the bot's walk actually reaches
 
@@ -461,14 +468,16 @@ already agree per account, and `bot/selftest.ts` enforces that agreement on
 | Jump button | `Jump to latest`, only after the user scrolled up |
 | Status region | sr-only `role="status"` (tool states, "Confirmation needed: …", "New chat started") |
 | New chat | `getByRole("button", { name: "New chat" })` in the header (ghost `+` icon, tooltip `New chat`); disabled while the conversation is empty |
-| Close | `Escape` or the `Close` (sr-only) X button |
+| Close | `Escape` or the `Close` (sr-only) X button: `getByRole("button", { name: "Close", exact: true })` inside the panel |
 
 The conversation lives in memory only: it survives closing the panel and client-side route changes, and is gone after New chat, a reload, sign-out or workspace switch.
 
 New chat stops any reply in flight (like `Stop`), drops unconfirmed cards with nothing written, and clears messages, tool rows, the conversation's alert (request errors, step limit), the draft and the `stopped` hint. No confirm dialog. Afterwards the empty state shows and the log is `aria-busy="false"`. What it does not reset:
 - Session alerts stay: offline, `The assistant isn't set up yet.`, the usage-limit lock, and a failed category load.
 - A card whose `Confirm` was already clicked still finishes its write after the clear: the `Added/Updated/Deleted: …` toast shows and `app:data-changed` fires while the log is empty.
-- Focus goes to the composer only when it is enabled; when it is disabled (offline or locked) focus goes to the panel itself (`[data-slot="sheet-content"]`, the `Assistant` dialog), so it stays inside the panel. The bot does not use it today: `askAssistant` counts messages relative to what is already in the log, so a carried-over conversation is fine.
+- Focus goes to the composer only when it is enabled; when it is disabled (offline or locked) focus goes to the panel itself (`[data-slot="sheet-content"]`, the `Assistant` dialog), so it stays inside the panel. The bot uses it: before the second thread of an `askAssistant`, and before the first one when the log already holds messages, it clicks `New chat` with chance `ASSISTANT_NEW_CHAT_RATE` (0.6) and waits for the first `[data-message-role]` to detach (the clear removes them all at once). It never clicks it on an empty log, where the button is disabled. Without it, `askAssistant` counts messages relative to what is already in the log, so a carried-over conversation is fine.
+
+The bot types into the composer key by key (`pressSequentially` with a per-archetype delay; a corrected typo is a wrong letter, `Backspace`, then the right one) and sends with `Enter` or a click on `Send`. It never uses `fill()` here. When `askAssistant` abandons (the archetype's `abandonRate`, before the first send) it may type part of the first prompt, then leaves with `Escape` or the `Close` button and sends nothing; the draft is local state of the composer, which unmounts with the panel, so it does not come back on the next open.
 
 ### Done signal
 After sending, wait for the new `[data-message-role="user"]`, then for a new assistant message **or** an alert, then for `[role="log"][aria-busy="false"]`. A pending confirm card leaves `aria-busy="false"`.

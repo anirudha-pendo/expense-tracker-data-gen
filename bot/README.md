@@ -107,7 +107,10 @@ what they affect.
 | `UI_RESET_MAX_ESCAPES` (5) | How many Escape presses the recovery code spends trying to close whatever a failed action left open. | 3–8. |
 | `FILTER_COUNT_MIN` / `FILTER_COUNT_MAX` (1–2) | How many of the four transaction filters one `filterTransactions` action touches at once. | 1–4 (4 is every filter at once). |
 | `FILTER_MONTH_LOOKBACK_MAX` (5) | The month filter picks a month up to this many months back. | 1–12. |
-| `ASSISTANT_PROMPTS_MIN` / `ASSISTANT_PROMPTS_MAX` (1–3) | Prompts one `askAssistant` action sends. | 1–5. |
+| `ASSISTANT_TURNS_PER_ACTION_MAX` (6) | Turns (openers + follow-ups) one `askAssistant` action may send. | 2–8. |
+| `ASSISTANT_TURNS_PER_SESSION_MAX` (10) | Assistant turns one session may send; at the cap `askAssistant` drops out of the walk. | 4–12. |
+| `ASSISTANT_TURNS_PER_RUN_MAX` (60) | Assistant turns the whole run may send (in-memory counter, one run only). Bounds model spend per run. | 20–120. |
+| `ASSISTANT_PROMPT_MAX_CHARS` (200) | Longest prompt the generator may produce; the selftest proves no template exceeds it. | 100–2000 (the app's own limit is 2000). |
 | `ASSISTANT_MAX_CARDS_PER_PROMPT` (3) | Confirm cards one prompt may resolve before the action fails as a runaway. | 2–5. |
 
 ### Timing and think pauses
@@ -133,6 +136,10 @@ what they affect.
 | `QUICK_ADD_SHORTCUT_RATE` (0.5) | The quick-add palette is opened with Ctrl+K rather than the header button. | 0–1. |
 | `ASSISTANT_SHORTCUT_RATE` (0.3) | The assistant panel is opened with Ctrl+J rather than the header button. | 0–1. |
 | `ASSISTANT_CONFIRM_RATE` (0.75) | An assistant confirm card is confirmed rather than cancelled. | 0–1. |
+| `ASSISTANT_FOCUS_SHARE` (0.15) | An assistant opener uses the day's focus cell instead of the archetype's intent mix (see "Assistant prompts"). | 0.05–0.3. 0 stops the daily focus cell, so rare cells get only their mix share. |
+| `ASSISTANT_SECOND_THREAD_RATE` (0.25) | One `askAssistant` starts a second topic after the first. | 0–0.5. |
+| `ASSISTANT_NEW_CHAT_RATE` (0.6) | `New chat` is clicked before a thread when the conversation already holds messages. | 0–1. |
+| `ASSISTANT_ABANDON_TYPED_RATE` (0.6) | An abandoned assistant panel gets 30–70% of its first prompt typed before it is closed (otherwise it is closed untouched). | 0–1. |
 | `INSIGHTS_SCROLL_RATE` (0.7) | An insights dwell pause is preceded by a scroll. | 0–1. |
 | `NEW_VISITOR_SHOW_PASSWORD_RATE` (0.35) | A signing-up visitor clicks "Show password". | 0–1. |
 | `NEW_VISITOR_CURRENCY_CHANGE_RATE` / `NEW_VISITOR_LOCALE_CHANGE_RATE` (0.6 each) | Workspace setup changes the currency/locale away from its default. | 0–1. |
@@ -149,6 +156,7 @@ what they affect.
 | `TOAST_TIMEOUT_MS` (15000) | How long a success toast gets to appear after a save. | 5000–30000. |
 | `QUICK_ADD_CHIPS_TIMEOUT_MS` (5000) | How long the quick-add palette gets to load its category chips. Shorter on purpose — a genuinely empty result should fail fast. | 2000–10000. |
 | `ASSISTANT_RESPONSE_TIMEOUT_MS` (60000) | How long one assistant reply, including its tool rounds, gets before `askAssistant` fails. | 30000–120000. |
+| `PENDO_READY_TIMEOUT_MS` (15000) | How long the once-per-session Pendo check waits for `pendo.isReady()` before logging a data-quality warning. | 5000–30000. |
 | `SCREENSHOT_TIMEOUT_MS` (15000) | How long a failure screenshot gets to be taken. Short on purpose — a hung page is usually *why* the session is failing. | 5000–20000. |
 
 There are a few more small pools not listed above (transaction backdating,
@@ -326,6 +334,21 @@ Once you know that real number, two examples of what to do with it:
   budget. Remove a cron entry, or lower `BASE_SESSIONS_PER_RUN`, until the
   arithmetic fits.
 
+Measured (40 scheduled runs, 6–11 October 2026): 1.0–4.6 minutes per run,
+2.65 on average, so about 240 × 3 ≈ 750 billed minutes a month. Typing the
+assistant's prompts key by key adds roughly 2–7 seconds per turn (about 33
+characters on average at 60–220 ms each). Turns sent per `askAssistant`,
+after abandonment, are about 2.7 for power, 2.2 regular, 1.3 casual, 0.8
+explorer and 0.6 churning: longer chats for heavy users, fewer for the rest,
+so a weekday run sends about 15 turns, roughly one more than with the old
+fixed follow-up cap. Each extra turn is about 15 seconds (typing, reply,
+pause), spread over `MAX_CONCURRENCY` browsers, so expect roughly +0.2 to +1
+minute per run and about 850–1,000 billed minutes a month (each job rounds up
+to a whole minute). The ceiling is `ASSISTANT_TURNS_PER_RUN_MAX`: a run that
+sends all 60 turns adds about 2 minutes, about 1,300 minutes a month if every
+run did. If that ever binds, lower that cap or the `charDelayMs` ranges in
+`ARCHETYPE_STYLE` (`assistant-prompts.ts`).
+
 Also watch the job's `timeout-minutes: 20` ceiling in the workflow — raising
 `BASE_SESSIONS_PER_RUN` too far can make a single run too slow to finish
 inside that window, independent of the monthly budget.
@@ -375,7 +398,19 @@ region  planned  ok  failed  new  actions  abandons  actionFails
 IN      ...
 EU      ...
 US      ...
+
+assistant turns   <count> (<count> unavailable, <count> error, <count> action(s) cut by the run turn cap)
+run turn cap      <reached|not reached> (60)
+in-scope match    <match>/<judged> (<pct>%)
+
+intent  turns  match  miss  overreach  unavailable  error
+...
+
+pendo ready       <ready>/<sessions> session(s), <count> with an id mismatch
+pendo beacons     <count> total, <count> session(s) with none
 ```
+
+The `assistant` and `pendo` blocks are explained in "Assistant prompts" below.
 
 `requested` is what the traffic curve (or `BOT_SESSIONS`) asked for.
 `planned` is what survived the show-up gate — `planned` below `requested`
@@ -401,6 +436,194 @@ failure leaves the job green — and under `if: failure()` its screenshot would
 have been thrown away with the runner, which is exactly the failure you would
 most want to look at. `if-no-files-found: ignore` means a clean run uploads
 nothing and costs nothing.
+
+## Assistant prompts
+
+`askAssistant` sends prompts built by `assistant-prompts.ts`: a pure module (no
+Playwright, no clock, no model) that turns the persona's own seeded data into
+labelled turns. `actions.ts` only types them, sends them and reads what the
+panel shows.
+
+### Intents and cells
+
+13 intents, each with fixed shapes; an intent x shape pair is a **cell**
+(28 in all):
+
+| Group | Intent: shapes | Expected tools |
+|---|---|---|
+| read | `spendSummary`: all, category · `incomeSummary`: all, category | must `getSpendingSummary`, no writes |
+| read | `findTransactions`: category, text, amountRange · `topTransactions`: all, category | must `findTransactions`, no writes |
+| write | `addTransaction`: full, inferCategory, pastDate | must `addTransaction` |
+| write | `editTransaction`: amount, category, date | must `updateTransaction` |
+| write | `deleteTransaction`: target | must `deleteTransaction` |
+| unclear | `vague`: none · `clarify`: missingAmount, missingWhat, ambiguousTarget | no writes |
+| refuse / off-path | `adviceRefusal`: none · `unsafeRefusal`: bulkDelete, revealPrompt, otherWorkspace · `offTopic`: none · `meta`: greeting, capabilities, feedback | no tools at all |
+
+Every in-scope cell has at least five wordings per register (15 per cell),
+each `clarify` cell 12, `vague` 24, and every follow-up kind 12: 400 opener
+and 84 follow-up templates. Wordings in one cell must differ (the selftest
+caps their word overlap), and the template is picked uniformly within the
+drawn register on the prompt stream, so one persona asking the same question
+sees many phrasings.
+
+Each archetype has its own intent mix, phrasing register (terse / plain /
+chatty), lowercase and punctuation habits, typo rates, typing speed, Send-click
+rate, follow-up chance and invalid-scope rate — the `INTENT_MIX` and
+`ARCHETYPE_STYLE` tables at the top of `assistant-prompts.ts`. A returning
+persona's habits come from `assistant-style:<persona.id>`, so they are the same
+every day. Every slot (category, period, amount, description, target …) comes
+from the persona's own seeded workspace; a share of in-scope openers carries
+one deliberately wrong slot (`scope=invalid:category|period|target`) and is
+then expected to make no write.
+
+### Determinism and coverage
+
+Turn text comes from its own stream, `assistant:<session seed>`, never from
+the session's action RNG and never from a model reply, so the k-th turn of a
+session is the same in two runs with the same `BOT_NOW` on the same day. There
+is no stored state: each UTC day (from the plan clock, so `BOT_NOW` moves it)
+favours one cell, `CELLS[day mod 28]`, for `ASSISTANT_FOCUS_SHARE` of openers,
+so every cell is favoured on one day in every 28. Favoured is not guaranteed:
+the focus cell still has to be drawn. On a weekday dozens of openers make that
+near certain; a weekend day has only 1–5 sessions (about 15 openers, about 1.8
+expected focus hits after the share and eligibility), so roughly one weekend
+focus day in six passes without its cell. The selftest checks that every cell
+appears at 400 openers a day, not at weekend volume.
+
+### Threads, follow-ups and caps
+
+One `askAssistant` runs one thread, or two at `ASSISTANT_SECOND_THREAD_RATE`.
+Before a thread, when the log already holds messages, it clicks `New chat` at
+`ASSISTANT_NEW_CHAT_RATE`. After each turn a follow-up (`periodShift`,
+`categoryShift`, `refine`, `amountFix`, `answerClarify`, `pickCandidate`,
+`thanks`, `nextQuestion`) comes at the archetype's `followUp` chance, at most its
+`followUpsMax` per thread (`ARCHETYPE_STYLE` in `assistant-prompts.ts`):
+
+| | power | regular | casual | explorer | churning |
+|---|---|---|---|---|---|
+| `followUp` (chance after each turn) | 0.75 | 0.65 | 0.35 | 0.20 | 0.10 |
+| `followUpsMax` (per thread) | 5 | 4 | 2 | 1 | 1 |
+
+Measured over 10,000 first actions per archetype (selftest AD5), turns per
+thread:
+
+| | power | regular | casual | explorer | churning |
+|---|---|---|---|---|---|
+| Mean turns per thread | 2.48 | 2.12 | 1.43 | 1.19 | 1.10 |
+| Threads of one turn | 26% | 36% | 65% | 81% | 90% |
+
+New visitors use the `explorer` row. The kind is drawn uniformly from those
+that fit the previous turn. `thanks` ends a thread. `nextQuestion` fits after
+any turn: it is a fresh opener (same mix, focus cell, invalid-scope rate and
+style as an opener) logged as `kind=followup:nextQuestion` with that opener's
+own intent, shape, scope and expectation. It never draws a `clarify` or a
+`meta/feedback` opener ("log 15", "Not really what I asked for."): mid-chat
+those read as a reply to the last answer, and the model may rightly retry it.
+It is what lets a chat that opened with a write or an off-path question keep
+going.
+
+A `clarify/ambiguousTarget` opener either deletes ("delete my
+coffee") or names the new amount ("change my coffee to 4.50"), so its
+`pickCandidate` follow-up ("the one on Oct 3") completes the write: it must
+call `deleteTransaction` or `updateTransaction` respectively.
+
+Caps: `ASSISTANT_TURNS_PER_ACTION_MAX` per action,
+`ASSISTANT_TURNS_PER_SESSION_MAX` per session, and `ASSISTANT_TURNS_PER_RUN_MAX`
+per run (an in-memory counter shared by every session of the run). The turn
+that uses the run's last slot logs `askAssistant: run turn cap reached (60)`,
+and from then on `askAssistant` has weight 0 for the rest of the run. An action
+already in flight when the cap runs out stops there: if it sent no turn it logs
+`skipped:askAssistant (run turn cap)` and counts as a skip; if it sent some it
+logs `askAssistant: run turn cap cut this action after <n> turn(s)` and still
+counts as performed. Both kinds count in the summary's "cut by the run turn
+cap", and the `run turn cap` line says whether the cap was reached.
+
+### Abandoning the panel
+
+`askAssistant` abandons like every other dialog: after the panel opens it rolls
+the archetype's `abandonRate` on the session RNG (power 0.10, regular 0.18,
+casual 0.30, explorer 0.45, churning 0.55, new visitor 0.30). On abandon it
+sends nothing. At `ASSISTANT_ABANDON_TYPED_RATE` it first types 30–70% of the
+planned first prompt key by key (never all of it; nothing for a prompt of 3
+characters or fewer), then closes the panel with `Escape` or its `Close`
+button (`ABANDON_VIA_ESCAPE_RATE`), and logs `abandoned:askAssistant`. The
+half-typed draft is dropped: the composer unmounts when the panel closes. The
+plan was drawn before the roll, so its turns still count against the session
+cap, and the prompt stream stays the same whether or not the user gave up.
+
+### Reading the turn lines
+
+One line per turn:
+
+```
+askAssistant: turn 1/1 intent=addTransaction shape=full scope=valid period=- kind=opener expect=addTransaction got=[addTransaction] verdict=match send=enter text="hey can you add 36 for groceries? put it under food & dining"
+```
+
+`got=` lists the `data-tool` names of the tool rows that appeared in the panel
+after this turn was sent — read from the page, never from the network.
+`send=` says how the turn was sent: `enter` (the Enter key) or `click` (the
+`Send` button), drawn per turn at the archetype's `sendClick` rate.
+`verdict` is `match`, `miss` (no required tool), `overreach` (a forbidden tool
+ran; beats miss) or `unavailable` (an alert ended the turn). A turn that throws
+(a reply timeout, say) still logs its line, with `verdict=error` and `got=?`
+when the tool rows can no longer be read, and is followed by the action's
+`failed:askAssistant` line; it counts in the turn total and the `error` column
+but not in the in-scope match rate. Verdicts measure
+the model and never change the exit code.
+
+### The `assistant` and `pendo` summary blocks
+
+```
+assistant turns   <turns> (<n> unavailable, <n> error, <n> action(s) cut by the run turn cap)
+run turn cap      <reached|not reached> (60)
+in-scope match    <match>/<judged> (<pct>%)
+
+intent            turns  match  miss  overreach  unavailable  error
+<one row per intent used this run>
+
+pendo ready       <ready>/<sessions> session(s), <n> with an id mismatch
+pendo beacons     <n> total, <n> session(s) with none
+```
+
+`in-scope match` counts only the first seven intents, with a valid scope and
+an answer. `pendo ready` is the once-per-session read-only check: after
+seeding (or after workspace setup for a new visitor) the bot waits up to
+`PENDO_READY_TIMEOUT_MS` for `pendo.isReady()`, then reads `getVisitorId()` and
+`getAccountId()`; a returning persona must match its seeded `user.id` and
+`workspace.id`. If the read itself throws (say the page is still navigating),
+the session logs `pendo: check failed (<reason>) (data-quality warning)` and
+carries on; it is never a session failure. `pendo beacons` counts requests to a host containing `pendo`
+whose path contains `/data/ptm.gif/` — Pendo's event beacon, one per click or
+page view (measured October 2026; the agent's other `/data/` calls —
+`guide.json`, `guide.gif`, `segmentflag.json`, `recordingconf`, `devlog`,
+`rec` — are guide, config and replay traffic and are not counted). A session
+that ran actions but sent no beacon logs a data-quality warning. Neither block
+changes the exit code.
+
+### Pure usage
+
+The bot produces Pendo data only by using the app the way a person does.
+Allowed: Playwright locator actions on visible UI (`click`, `press`,
+`pressSequentially`, `hover`), passive reads (`count`, `innerText`,
+`getAttribute`, `isVisible`, `waitFor`), and a passive `page.on("request")`
+counter. Bootstrap only: the IndexedDB/localStorage seed in `seed.ts`, the CDP
+storage clear, and the `preparePage` polyfill. The assistant composer is typed
+key by key (`pressSequentially` with the turn's delay; a corrected typo is a
+wrong letter, `Backspace`, then the right one) and sent with `Enter` or a
+click on `Send` — never `fill()`. Forbidden everywhere: request interception
+(`route`, `routeFromHAR`, `routeWebSocket`), `dispatchEvent`, `force` set to
+anything but `false`, `fetch(`, `page.request` and other API request
+contexts, `XMLHttpRequest`/`sendBeacon`, any `/api/` path, `exposeFunction`/
+`exposeBinding`, `$eval`/`$$eval`/`evaluateAll`/`evaluateHandle`/
+`addScriptTag`, a method called by its string name, and any Pendo call that
+sends or changes data (`track`, `identify`, `initialize`, `pageLoad`,
+`clearSession`, `updateOptions`, `trackAgent`, under any alias). Page scripts
+stay in their places: `evaluate` in `seed.ts` and `readPendoState`,
+`waitForFunction` in `readPendoState`, `addInitScript` in `preparePage`,
+`newCDPSession` in `seed.ts`. Only `readPendoState` touches `window.pendo`, and
+only through `isReady`, `getVisitorId` and `getAccountId`. `npm run selftest`
+scans every bot source file with regexes (spacing and optional chaining
+included) and fails on a hit.
 
 ## When the run exits non-zero
 

@@ -66,19 +66,19 @@ import {
   UI_RESET_MAX_ESCAPES,
   UI_RESET_SETTLE_MS,
   ASSISTANT_SHORTCUT_RATE,
-  ASSISTANT_PROMPTS_MIN,
-  ASSISTANT_PROMPTS_MAX,
+  ASSISTANT_ABANDON_TYPED_RATE,
   ASSISTANT_RESPONSE_TIMEOUT_MS,
   ASSISTANT_CONFIRM_RATE,
   ASSISTANT_MAX_CARDS_PER_PROMPT,
+  ASSISTANT_TURNS_PER_RUN_MAX,
   makeRng,
   type Rng,
 } from "./config";
 import { errorCopy } from "../src/features/assistant/contract/errors";
+import { abandonPrefix, formatTurnLine, verdict, type AssistantPlanner, type ThreadPlan, type Turn, type TurnRecord, type TurnResult } from "./assistant-prompts";
 import { ARCHETYPES, accountForOrUndefined, type ActionName, type Persona } from "./personas";
 import {
   AMOUNT_ROUNDING_UNIT,
-  ASSISTANT_PROMPT_TEMPLATES,
   CUSTOM_CATEGORY_SEEDS,
   DEFAULT_CATEGORY_SEEDS,
   EXPENSE_TRANSACTION_RATE,
@@ -88,7 +88,6 @@ import {
   GOAL_SEED_POOL,
   SWATCH_PRESET_COLORS,
   WORKSPACE_NAME_TEMPLATES,
-  type AssistantPromptIntent,
   type CategorySeed,
 } from "./seed-data";
 
@@ -105,8 +104,18 @@ export interface SessionCtx {
   log: (msg: string) => void;
   /** Set once a panel alert appears; the assistant is not used again this session. */
   assistantOff: boolean;
-  /** The categories this session's workspace was seeded with; prompts name these. */
-  categorySeeds: readonly CategorySeed[];
+  /** This session's prompt plan, on its own RNG stream so model replies never shift it. */
+  assistant: AssistantPlanner;
+  assistantLog: AssistantSessionLog;
+}
+
+/** What this session's assistant turns did, for the run summary. */
+export interface AssistantSessionLog {
+  turns: TurnRecord[];
+  /** askAssistant actions cut short by the run turn cap. */
+  capSkips: number;
+  /** This session sent the run's last allowed turn. */
+  capReached: boolean;
 }
 
 export interface Action {
@@ -1172,21 +1181,9 @@ async function runUseQuickAdd(page: Page, ctx: SessionCtx): Promise<void> {
 
 // not_configured and an exhausted spend limit will not clear within a run, so stop knocking.
 let assistantOffForRun = false;
+// One process runs every session of a run, so this counts the whole run and resets with the next one.
+const assistantRunCap: RunTurnCap = { used: 0, max: ASSISTANT_TURNS_PER_RUN_MAX };
 const RUN_ENDING_ALERTS = [errorCopy("not_configured"), errorCopy("provider_quota_exhausted")];
-
-function buildAssistantPrompt(
-  rng: Rng,
-  categories: readonly CategorySeed[],
-): { intent: AssistantPromptIntent; text: string } {
-  const template = rng.weighted(ASSISTANT_PROMPT_TEMPLATES, (t) => t.weight);
-  const expense = categories.filter((c) => c.scope === "expense");
-  const seed = rng.pick(expense.length > 0 ? [...expense] : [...categories]);
-  const text = template.text
-    .replaceAll("{category}", seed.name)
-    .replaceAll("{description}", rng.pick(seed.descriptions).toLowerCase())
-    .replaceAll("{amount}", String(rng.int(seed.amountMin, seed.amountMax)));
-  return { intent: template.intent, text };
-}
 
 function assistantPanel(page: Page): Locator {
   return page.getByRole("dialog", { name: "Assistant" });
@@ -1227,38 +1224,153 @@ async function settleAssistantReply(page: Page, ctx: SessionCtx, panel: Locator)
   throw new Error(`the assistant proposed more than ${ASSISTANT_MAX_CARDS_PER_PROMPT} confirm cards for one prompt`);
 }
 
+export interface RunTurnCap {
+  used: number;
+  max: number;
+}
+
+/** Books one turn against the run cap: "last" when it uses the final slot, "refused" once none are left. */
+export function takeRunTurn(cap: RunTurnCap): "sent" | "last" | "refused" {
+  if (cap.used >= cap.max) return "refused";
+  cap.used += 1;
+  return cap.used === cap.max ? "last" : "sent";
+}
+
+/** Only an action that sent nothing is a skip; one that already typed turns still counts as performed. */
+export function runCapCutLine(sent: number): string {
+  return sent === 0 ? "skipped:askAssistant (run turn cap)" : `askAssistant: run turn cap cut this action after ${sent} turn(s)`;
+}
+
+function assistantAvailable(ctx: SessionCtx): boolean {
+  return !assistantOffForRun && !ctx.assistantOff && assistantRunCap.used < assistantRunCap.max && ctx.assistant.turnsLeft() > 0;
+}
+
+/** Real keystrokes only: a corrected typo is typed, backspaced and retyped. */
+async function typeTurn(panel: Locator, input: Locator, turn: Turn): Promise<void> {
+  for (const step of turn.typing) {
+    if (step.kind === "backspace") await input.press("Backspace");
+    else await input.pressSequentially(step.text, { delay: turn.charDelayMs });
+  }
+  if (turn.send === "click") await panel.getByRole("button", { name: "Send", exact: true }).click();
+  else await input.press("Enter");
+}
+
+async function toolNames(rows: Locator, from: number): Promise<string[]> {
+  const names: string[] = [];
+  const total = await rows.count();
+  for (let i = from; i < total; i++) {
+    const name = await rows.nth(i).getAttribute("data-tool");
+    if (name !== null) names.push(name);
+  }
+  return names;
+}
+
+/** Types and sends one turn, then waits until the reply and any confirm cards have settled. */
+async function sendTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn): Promise<PromptOutcome> {
+  const log = panel.getByRole("log", { name: "Conversation" });
+  const users = log.locator('[data-message-role="user"]');
+  const replies = log.locator('[data-message-role="assistant"]');
+  const sentBefore = await users.count();
+  const repliesBefore = await replies.count();
+  const input = panel.getByLabel("Message", { exact: true });
+  await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  await typeTurn(panel, input, turn);
+  await users.nth(sentBefore).waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+  await replies
+    .nth(repliesBefore)
+    .or(panel.getByRole("alert"))
+    .first()
+    .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
+  return settleAssistantReply(page, ctx, panel);
+}
+
+function recordTurn(ctx: SessionCtx, index: number, total: number, turn: Turn, tools: readonly string[] | null, result: TurnResult): void {
+  ctx.log(formatTurnLine(index, total, turn, tools, result));
+  ctx.assistantLog.turns.push({ intent: turn.intent, scopeLabel: turn.scopeLabel, verdict: result });
+}
+
+/** Every turn leaves its line, including one that throws (a reply timeout, say); the throw still fails the action. */
+async function askTurn(page: Page, ctx: SessionCtx, panel: Locator, turn: Turn, index: number, total: number): Promise<PromptOutcome> {
+  const toolRows = panel.getByRole("log", { name: "Conversation" }).locator("[data-tool]");
+  let toolsBefore: number | null = null;
+  try {
+    toolsBefore = await toolRows.count();
+    const outcome = await sendTurn(page, ctx, panel, turn);
+    const tools = await toolNames(toolRows, toolsBefore);
+    recordTurn(ctx, index, total, turn, tools, verdict(turn.expect, tools, outcome === "unavailable"));
+    return outcome;
+  } catch (err) {
+    // A dead page cannot be read; got=? says so, and the original error is the one that propagates.
+    const tools = toolsBefore === null ? null : await toolNames(toolRows, toolsBefore).catch(() => null);
+    recordTurn(ctx, index, total, turn, tools, "error");
+    throw err;
+  }
+}
+
+async function startNewChat(panel: Locator, ctx: SessionCtx): Promise<void> {
+  await panel.getByRole("button", { name: "New chat", exact: true }).click();
+  await panel
+    .getByRole("log", { name: "Conversation" })
+    .locator("[data-message-role]")
+    .first()
+    .waitFor({ state: "detached", timeout: DIALOG_TIMEOUT_MS });
+  ctx.log("askAssistant: new chat");
+}
+
+async function askThreads(page: Page, ctx: SessionCtx, panel: Locator, threads: readonly ThreadPlan[]): Promise<void> {
+  const total = threads.reduce((sum, thread) => sum + thread.turns.length, 0);
+  const messages = panel.getByRole("log", { name: "Conversation" }).locator("[data-message-role]");
+  let index = 0;
+  for (const thread of threads) {
+    if (thread.newChat && (await messages.count()) > 0) await startNewChat(panel, ctx);
+    for (const turn of thread.turns) {
+      const taken = takeRunTurn(assistantRunCap);
+      if (taken === "refused") {
+        ctx.assistantLog.capSkips += 1;
+        ctx.log(runCapCutLine(index));
+        return;
+      }
+      if (taken === "last") {
+        ctx.assistantLog.capReached = true;
+        ctx.log(`askAssistant: run turn cap reached (${assistantRunCap.max})`);
+      }
+      index += 1;
+      if ((await askTurn(page, ctx, panel, turn, index, total)) === "unavailable") return;
+      await think(page, ctx);
+    }
+  }
+}
+
+/** Leaves before the first send, like the other dialogs: sometimes part of the prompt typed, then Escape or the Close button. */
+async function abandonAssistant(page: Page, ctx: SessionCtx, panel: Locator, first: Turn | undefined): Promise<void> {
+  if (first !== undefined && ctx.rng.chance(ASSISTANT_ABANDON_TYPED_RATE)) {
+    const prefix = abandonPrefix(first.text, ctx.rng);
+    if (prefix.length > 0) {
+      const input = panel.getByLabel("Message", { exact: true });
+      await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+      await input.pressSequentially(prefix, { delay: first.charDelayMs });
+    }
+  }
+  if (ctx.rng.chance(ABANDON_VIA_ESCAPE_RATE)) await page.keyboard.press("Escape");
+  else await panel.getByRole("button", { name: "Close", exact: true }).click();
+  await panel.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });
+  ctx.log("abandoned:askAssistant");
+}
+
 async function runAskAssistant(page: Page, ctx: SessionCtx): Promise<void> {
+  // Drawn before the abandon roll so the prompt stream never depends on it; an abandoned plan still uses up session turns.
+  const plan = ctx.assistant.nextAction();
   await ensureAppRoute(page, ctx);
   if (ctx.rng.chance(ASSISTANT_SHORTCUT_RATE)) await page.keyboard.press("Control+j");
   else await page.getByRole("button", { name: "Open assistant", exact: true }).click();
   const panel = assistantPanel(page);
   await panel.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
-  const log = panel.getByRole("log", { name: "Conversation" });
-  const input = panel.getByLabel("Message", { exact: true });
-
-  const prompts = ctx.rng.int(ASSISTANT_PROMPTS_MIN, ASSISTANT_PROMPTS_MAX);
-  for (let i = 0; i < prompts; i++) {
-    const { intent, text } = buildAssistantPrompt(ctx.rng, ctx.categorySeeds);
-    const users = log.locator('[data-message-role="user"]');
-    const sentBefore = await users.count();
-    const repliesBefore = await log.locator('[data-message-role="assistant"]').count();
-    await input.waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
-    await input.fill(text);
-    await input.press("Enter");
-    await users.nth(sentBefore).waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
-    await log
-      .locator('[data-message-role="assistant"]')
-      .nth(repliesBefore)
-      .or(panel.getByRole("alert"))
-      .first()
-      .waitFor({ state: "visible", timeout: ASSISTANT_RESPONSE_TIMEOUT_MS });
-    ctx.log(`askAssistant: sent a ${intent} prompt`);
-    if ((await settleAssistantReply(page, ctx, panel)) === "unavailable") break;
+  if (ctx.rng.chance(ctx.abandonRate)) {
+    await abandonAssistant(page, ctx, panel, plan.threads.at(0)?.turns.at(0));
     await think(page, ctx);
+    return;
   }
-
-  const rows = (await log.locator("[data-tool]").allInnerTexts()).map((r) => r.trim());
-  ctx.log(`askAssistant: tool rows [${rows.join(" | ")}]`);
+  await askThreads(page, ctx, panel, plan.threads);
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "hidden", timeout: DIALOG_TIMEOUT_MS });
   await think(page, ctx);
@@ -1411,7 +1523,7 @@ const ACTION_MAP: ActionMap = {
   },
   askAssistant: {
     name: "askAssistant",
-    weight: (ctx) => (assistantOffForRun || ctx.assistantOff ? 0 : archetypeWeight("askAssistant")(ctx)),
+    weight: (ctx) => (assistantAvailable(ctx) ? archetypeWeight("askAssistant")(ctx) : 0),
     run: runAskAssistant,
   },
   signOut: {

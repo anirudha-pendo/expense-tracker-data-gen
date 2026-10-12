@@ -41,9 +41,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, errors, type Browser, type BrowserContext, type Page } from "playwright";
 import {
   APP_URL,
+  ASSISTANT_FOCUS_SHARE,
+  ASSISTANT_TURNS_PER_RUN_MAX,
   FAILURE_DIR,
   HEADLESS,
   MAX_ACTION_FAILURE_RATE,
@@ -59,6 +61,7 @@ import {
   NEW_VISITOR_SHOW_PASSWORD_RATE,
   NEW_VISITOR_WALK_MAX,
   NEW_VISITOR_WALK_MIN,
+  PENDO_READY_TIMEOUT_MS,
   REGION_CURVE,
   REGIONS,
   SCREENSHOT_TIMEOUT_MS,
@@ -81,14 +84,22 @@ import {
   selectOptionByText,
   think,
   type Action,
+  type AssistantSessionLog,
   type SessionCtx,
 } from "./actions";
-import { ARCHETYPES, PERSONAS, personaCategorySeeds, type ActionName, type Persona } from "./personas";
+import {
+  INTENT_MIX,
+  createAssistantPlanner,
+  formatMatchRate,
+  newVisitorPromptData,
+  promptDataFromSeed,
+  summarizeAssistant,
+} from "./assistant-prompts";
+import { ARCHETYPES, PERSONAS, buildSeedData, type ActionName, type Persona, type SeedData } from "./personas";
 import { clearBrowserState, seedPersona } from "./seed";
 import {
   buildNewVisitorIdentity,
   CURRENCY_OPTION_LABELS,
-  DEFAULT_CATEGORY_SEEDS,
   LOCALE_OPTION_LABELS,
   PERSONA_PASSWORD,
   REGION_WORKSPACE_OPTIONS,
@@ -377,6 +388,100 @@ function fullError(err: unknown): string {
 // Session execution
 // =============================================================================
 
+// Pendo's event beacon; its other /data/ calls (guide.json, segmentflag.json, recordingconf, rec) are config and replay traffic.
+const PENDO_BEACON_PATH = "/data/ptm.gif/";
+
+export type IdCheck = "match" | "mismatch";
+
+export type PendoReading =
+  | { status: "unchecked" }
+  | { status: "not-ready" }
+  | { status: "failed"; reason: string }
+  | { status: "ready"; visitor: IdCheck; account: IdCheck };
+
+export interface SessionPendo {
+  reading: PendoReading;
+  beacons: number;
+}
+
+export interface PendoIds {
+  visitorId: string;
+  accountId: string;
+}
+
+export function isPendoBeacon(url: string): boolean {
+  const { hostname, pathname } = new URL(url);
+  return hostname.includes("pendo") && pathname.includes(PENDO_BEACON_PATH);
+}
+
+/** A returning persona must carry its seeded ids; a new visitor's are minted by sign-up, so they only have to exist. */
+export function comparePendoIds(actual: PendoIds, expected: PendoIds | null): { visitor: IdCheck; account: IdCheck } {
+  const check = (value: string, wanted: string | undefined): IdCheck =>
+    (wanted === undefined ? value.length > 0 : value === wanted) ? "match" : "mismatch";
+  return { visitor: check(actual.visitorId, expected?.visitorId), account: check(actual.accountId, expected?.accountId) };
+}
+
+export function formatPendoReading(reading: PendoReading): string {
+  if (reading.status === "ready") return `pendo: ready visitor=${reading.visitor} account=${reading.account}`;
+  if (reading.status === "not-ready") return `pendo: not ready after ${PENDO_READY_TIMEOUT_MS}ms (data-quality warning)`;
+  if (reading.status === "failed") return `pendo: check failed (${reading.reason}) (data-quality warning)`;
+  return "pendo: not checked";
+}
+
+export function formatBeaconLine(beacons: number, actions: number): string {
+  if (beacons === 0 && actions > 0) return `pendo: 0 beacons (data-quality warning: ${actions} action(s) ran)`;
+  return `pendo: ${beacons} beacons`;
+}
+
+export function formatPendoBlock(sessions: readonly SessionPendo[]): string[] {
+  const ready = sessions.filter((s) => s.reading.status === "ready").length;
+  const mismatched = sessions.filter((s) => s.reading.status === "ready" && (s.reading.visitor === "mismatch" || s.reading.account === "mismatch")).length;
+  const beacons = sessions.reduce((acc, s) => acc + s.beacons, 0);
+  const silent = sessions.filter((s) => s.beacons === 0).length;
+  return [
+    "",
+    `pendo ready       ${ready}/${sessions.length} session(s), ${mismatched} with an id mismatch`,
+    `pendo beacons     ${beacons} total, ${silent} session(s) with none`,
+  ];
+}
+
+/** The bot's only Pendo contact: wait for the agent, then read two getters. Nothing is sent or changed. */
+async function readPendoState(page: Page): Promise<PendoIds | "not-ready"> {
+  try {
+    await page.waitForFunction(() => (window as PendoWindow).pendo?.isReady?.() === true, undefined, { timeout: PENDO_READY_TIMEOUT_MS });
+  } catch (err) {
+    if (err instanceof errors.TimeoutError) return "not-ready";
+    throw err;
+  }
+  return page.evaluate(() => {
+    const agent = (window as PendoWindow).pendo;
+    const visitorId = agent?.getVisitorId?.();
+    const accountId = agent?.getAccountId?.();
+    return { visitorId: typeof visitorId === "string" ? visitorId : "", accountId: typeof accountId === "string" ? accountId : "" };
+  });
+}
+
+/** Read-only getters the Pendo agent exposes; `src/global.d.ts` types only the write API. */
+type PendoWindow = Window & {
+  pendo?: { isReady?: () => boolean; getVisitorId?: () => unknown; getAccountId?: () => unknown };
+};
+
+/** Never throws: a Pendo problem is a data-quality warning and must not fail the session or the run. */
+export async function checkPendo(read: () => Promise<PendoIds | "not-ready">, seed: SeedData | null, log: (msg: string) => void): Promise<PendoReading> {
+  let reading: PendoReading;
+  try {
+    const state = await read();
+    reading =
+      state === "not-ready"
+        ? { status: "not-ready" }
+        : { status: "ready", ...comparePendoIds(state, seed === null ? null : { visitorId: seed.user.id, accountId: seed.workspace.id }) };
+  } catch (err) {
+    reading = { status: "failed", reason: firstLine(err) };
+  }
+  log(formatPendoReading(reading));
+  return reading;
+}
+
 interface SessionCounters {
   /** Actions that ran to completion. An abandoned dialog counts (the drop-off is the data); a `skipped:` no-op does not. */
   actions: number;
@@ -394,6 +499,8 @@ interface SessionOutcome {
   error: string | null;
   url: string | null;
   screenshot: string | null;
+  assistant: AssistantSessionLog;
+  pendo: SessionPendo;
 }
 
 /**
@@ -558,11 +665,14 @@ async function driveSession(
   planned: PlannedSession,
   ctx: SessionCtx,
   counters: SessionCounters,
+  seed: SeedData | null,
+  pendo: SessionPendo,
 ): Promise<void> {
-  if (planned.kind === "returning") {
+  if (seed !== null) {
     // Writes the persona's history straight into IndexedDB and comes back on
     // a rendered dashboard, so the analytics agent sees a returning user.
-    await seedPersona(page, planned.persona);
+    await seedPersona(page, planned.persona, seed);
+    pendo.reading = await checkPendo(() => readPendoState(page), seed, ctx.log);
     const archetype = ARCHETYPES[planned.persona.archetype];
     const steps = ctx.rng.int(archetype.sessionLengthMin, archetype.sessionLengthMax);
     ctx.log(`walking ${steps} step(s)`);
@@ -571,6 +681,7 @@ async function driveSession(
   }
 
   await signUpNewVisitor(page, ctx);
+  pendo.reading = await checkPendo(() => readPendoState(page), null, ctx.log);
   // First act of a fresh account is to put something in it. That is what a
   // real first session looks like, and it leaves the remaining steps a
   // workspace with data rather than an empty one.
@@ -640,9 +751,13 @@ async function captureFailure(
 async function runOneSession(
   browser: Browser,
   planned: PlannedSession,
+  planNow: Date,
   failureDir: string,
 ): Promise<SessionOutcome> {
   const startedAt = Date.now();
+  // One instant for the seed, the prompts' "today" and the browser clock, so "yesterday" means the same day to all three.
+  const sessionNow = new Date();
+  const seed = planned.kind === "returning" ? buildSeedData(planned.persona, sessionNow) : null;
   const counters: SessionCounters = { actions: 0, abandonments: 0, skips: 0, actionFailures: 0 };
   const rng = makeRng(planned.seed);
   const viewport = rng.pick(VIEWPORTS);
@@ -660,10 +775,18 @@ async function runOneSession(
         : ARCHETYPES[planned.persona.archetype].abandonRate,
     log,
     assistantOff: false,
-    // A new visitor's fresh workspace holds only the app's default categories.
-    categorySeeds:
-      planned.kind === "returning" ? personaCategorySeeds(planned.persona) : DEFAULT_CATEGORY_SEEDS,
+    assistant: createAssistantPlanner({
+      sessionSeed: planned.seed,
+      styleKey: seed === null ? planned.seed : planned.persona.id,
+      archetype: planned.persona.archetype,
+      mix: INTENT_MIX[planned.persona.archetype],
+      data: seed === null ? newVisitorPromptData(sessionNow) : promptDataFromSeed(seed, sessionNow),
+      planNow,
+      focusShare: ASSISTANT_FOCUS_SHARE,
+    }),
+    assistantLog: { turns: [], capSkips: 0, capReached: false },
   };
+  const pendo: SessionPendo = { reading: { status: "unchecked" }, beacons: 0 };
 
   let context: BrowserContext | null = null;
   let page: Page | null = null;
@@ -674,13 +797,17 @@ async function runOneSession(
   try {
     context = await browser.newContext({ viewport, userAgent });
     page = await context.newPage();
+    // Passive: counts what the page sends, never changes or blocks it.
+    page.on("request", (request) => {
+      if (isPendoBeacon(request.url())) pendo.beacons += 1;
+    });
     // MUST come before the first navigation: it installs the no-op `__name`
     // polyfill without which every page.evaluate in the bot (seeding
     // included) dies with `ReferenceError: __name is not defined`.
     await preparePage(page);
     log(`start ${planned.kind} as ${planned.persona.archetype} at ${viewport.width}x${viewport.height}`);
     await withTimeout(
-      driveSession(page, planned, ctx, counters),
+      driveSession(page, planned, ctx, counters, seed, pendo),
       SESSION_TIMEOUT_MS,
       `session exceeded SESSION_TIMEOUT_MS (${SESSION_TIMEOUT_MS}ms)`,
     );
@@ -696,6 +823,7 @@ async function runOneSession(
       screenshot = await captureFailure(page, planned, failureDir, err, log);
     }
   } finally {
+    log(formatBeaconLine(pendo.beacons, counters.actions));
     if (context !== null) {
       try {
         await context.close();
@@ -713,6 +841,8 @@ async function runOneSession(
     error,
     url,
     screenshot,
+    assistant: ctx.assistantLog,
+    pendo,
   };
 }
 
@@ -739,7 +869,7 @@ async function runPool(
           if (index >= plan.sessions.length) return;
           const planned = plan.sessions[index];
           try {
-            outcomes[index] = await runOneSession(browser, planned, failureDir);
+            outcomes[index] = await runOneSession(browser, planned, plan.now, failureDir);
           } catch (err) {
             // runOneSession is written not to throw. This is the belt to that
             // braces: one session must never be able to take the run down,
@@ -753,6 +883,8 @@ async function runPool(
               error: firstLine(err),
               url: null,
               screenshot: null,
+              assistant: { turns: [], capSkips: 0, capReached: false },
+              pendo: { reading: { status: "unchecked" }, beacons: 0 },
             };
           }
         }
@@ -766,6 +898,38 @@ async function runPool(
 // =============================================================================
 // Summary
 // =============================================================================
+
+/** The run summary's assistant block: totals, the in-scope match rate, then one row per intent used. */
+export function formatAssistantBlock(logs: readonly AssistantSessionLog[]): string[] {
+  const summary = summarizeAssistant(
+    logs.flatMap((log) => log.turns),
+    logs.reduce((acc, log) => acc + log.capSkips, 0),
+  );
+  const lines = [
+    "",
+    `assistant turns   ${summary.turns} (${summary.unavailable} unavailable, ${summary.errors} error, ${summary.capSkips} action(s) cut by the run turn cap)`,
+    `run turn cap      ${logs.some((log) => log.capReached) ? "reached" : "not reached"} (${ASSISTANT_TURNS_PER_RUN_MAX})`,
+    `in-scope match    ${formatMatchRate(summary.inScopeMatch, summary.inScopeJudged)}`,
+  ];
+  if (summary.rows.length > 0) {
+    lines.push(
+      "",
+      renderTable(
+        ["intent", "turns", "match", "miss", "overreach", "unavailable", "error"],
+        summary.rows.map((row) => [
+          row.intent,
+          String(row.turns),
+          String(row.match),
+          String(row.miss),
+          String(row.overreach),
+          String(row.unavailable),
+          String(row.error),
+        ]),
+      ),
+    );
+  }
+  return lines;
+}
 
 function printSummary(plan: SessionPlan, outcomes: SessionOutcome[], wallClockMs: number): void {
   const succeeded = outcomes.filter((outcome) => outcome.ok).length;
@@ -806,6 +970,8 @@ function printSummary(plan: SessionPlan, outcomes: SessionOutcome[], wallClockMs
       ["region", "planned", "ok", "failed", "new", "actions", "abandons", "actionFails"],
       regionRows,
     ),
+    ...formatAssistantBlock(outcomes.map((outcome) => outcome.assistant)),
+    ...formatPendoBlock(outcomes.map((outcome) => outcome.pendo)),
   ];
 
   const failures = outcomes.filter((outcome) => !outcome.ok);

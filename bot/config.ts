@@ -342,15 +342,27 @@ export const QUICK_ADD_CHIPS_TIMEOUT_MS = 5000;
 
 /** Chance the assistant panel is opened with Ctrl+J rather than the header button. */
 export const ASSISTANT_SHORTCUT_RATE = 0.3;
-/** Prompts sent per askAssistant action. */
-export const ASSISTANT_PROMPTS_MIN = 1;
-export const ASSISTANT_PROMPTS_MAX = 3;
 /** How long one reply (including its tool rounds) gets before the action fails. */
 export const ASSISTANT_RESPONSE_TIMEOUT_MS = 60000;
 /** Chance a confirm card is confirmed rather than cancelled. */
 export const ASSISTANT_CONFIRM_RATE = 0.75;
 /** Confirm cards resolved per prompt before the action gives up on a model that keeps proposing. */
 export const ASSISTANT_MAX_CARDS_PER_PROMPT = 3;
+/** Chance an opener uses the day's focus cell instead of the archetype mix; every cell is focus once per 28 days. */
+export const ASSISTANT_FOCUS_SHARE = 0.15;
+/** Chance one askAssistant runs a second thread (a new topic) after the first. */
+export const ASSISTANT_SECOND_THREAD_RATE = 0.25;
+/** Chance an abandoned assistant panel gets part of its first prompt typed before it is closed. */
+export const ASSISTANT_ABANDON_TYPED_RATE = 0.6;
+/** Chance New chat is clicked before a thread when the log already holds messages. */
+export const ASSISTANT_NEW_CHAT_RATE = 0.6;
+/** Turn caps per askAssistant and per session. */
+export const ASSISTANT_TURNS_PER_ACTION_MAX = 6;
+export const ASSISTANT_TURNS_PER_SESSION_MAX = 10;
+/** Turn cap for the whole run: an in-memory counter, never persisted between runs. */
+export const ASSISTANT_TURNS_PER_RUN_MAX = 60;
+/** Longest prompt the generator may produce. */
+export const ASSISTANT_PROMPT_MAX_CHARS = 200;
 
 // --- Insights dwell ---------------------------------------------------------
 //
@@ -443,6 +455,9 @@ export const USER_AGENTS: string[] = [
  * timeout it is being taken because of.
  */
 export const SCREENSHOT_TIMEOUT_MS = 15000;
+
+/** How long the session's one Pendo check waits for the agent to report ready. */
+export const PENDO_READY_TIMEOUT_MS = 15000;
 
 // --- New-visitor sessions ---------------------------------------------------
 //
