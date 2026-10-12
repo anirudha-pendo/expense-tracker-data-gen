@@ -58,7 +58,8 @@ export function updateOptions(user: User, workspace: Workspace | null): void {
   pendo?.updateOptions(buildIdentifyOptions(user, workspace));
 }
 
-const ASSISTANT_AGENT_ID = "ledger-assistant";
+// Pendo drops agent events whose agentId is not the id of the agent in Pendo.
+const ASSISTANT_AGENT_ID = "s9FWSJy8gbmM2gAsxZFK3PgmDN8";
 
 export interface AgentEventProps {
   conversationId: string;
