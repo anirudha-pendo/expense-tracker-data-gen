@@ -32,4 +32,3 @@ bot/failures
 .vercel
 .env
 .env*.local
-.env*
