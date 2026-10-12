@@ -57,3 +57,53 @@ export function identify(user: User, workspace: Workspace | null): void {
 export function updateOptions(user: User, workspace: Workspace | null): void {
   pendo?.updateOptions(buildIdentifyOptions(user, workspace));
 }
+
+const ASSISTANT_AGENT_ID = "ledger-assistant";
+
+export interface AgentEventProps {
+  conversationId: string;
+  messageId: string;
+  content: string;
+  modelUsed: string;
+  toolsUsed?: string[];
+}
+
+/**
+ * Report one assistant event (a user prompt, or the agent's reply) to Pendo
+ * agent analytics. Guarded by type, like `clearSession`, because the loader
+ * stub may not have replaced `trackAgent` yet, and analytics must never break
+ * the chat.
+ */
+export function trackAssistantEvent(type: "prompt" | "agent_response", props: AgentEventProps): void {
+  if (typeof pendo?.trackAgent !== "function") return;
+  pendo.trackAgent(type, {
+    agentId: ASSISTANT_AGENT_ID,
+    suggestedPrompt: false,
+    fileUploaded: false,
+    toolsUsed: [],
+    ...props,
+  });
+}
+
+export type AssistantWriteOutcome = "confirmed" | "cancelled" | "failed";
+
+/**
+ * Report how a proposed write (add / edit / delete a transaction) ended. The
+ * agent's own events only say the tool was proposed; this says whether the user
+ * accepted it, which is the quality signal for the assistant's write tools.
+ */
+export function trackAssistantWrite(props: {
+  conversationId: string;
+  tool: string;
+  outcome: AssistantWriteOutcome;
+  reason?: string;
+}): void {
+  if (typeof pendo?.track !== "function") return;
+  pendo.track("assistant_write_resolved", { agentId: ASSISTANT_AGENT_ID, ...props });
+}
+
+/** Report a failed assistant turn, so failures show up beside the successful ones. */
+export function trackAssistantError(props: { conversationId: string; code: string }): void {
+  if (typeof pendo?.track !== "function") return;
+  pendo.track("assistant_error", { agentId: ASSISTANT_AGENT_ID, ...props });
+}
