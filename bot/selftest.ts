@@ -1779,6 +1779,13 @@ const CELL_FLOORS: Record<string, { perRegister: number; total: number }> = {
   "findTransactions/amountRange": { perRegister: 5, total: 15 },
   "topTransactions/all": { perRegister: 5, total: 15 },
   "topTransactions/category": { perRegister: 5, total: 15 },
+  "addTransaction/full": { perRegister: 5, total: 15 },
+  "addTransaction/inferCategory": { perRegister: 5, total: 15 },
+  "addTransaction/pastDate": { perRegister: 5, total: 15 },
+  "editTransaction/amount": { perRegister: 5, total: 15 },
+  "editTransaction/category": { perRegister: 5, total: 15 },
+  "editTransaction/date": { perRegister: 5, total: 15 },
+  "deleteTransaction/target": { perRegister: 5, total: 15 },
 };
 
 check("every opener cell meets its D4 template floor (AD8)", () => {
