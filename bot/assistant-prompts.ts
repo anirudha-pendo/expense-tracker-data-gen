@@ -366,9 +366,9 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "clarify",
     shape: "ambiguousTarget",
     templates: {
-      terse: ["delete my {ambiguous}", "change my {ambiguous}"],
-      plain: ["Delete my {ambiguous} transaction.", "Can you edit my {ambiguous} expense?"],
-      chatty: ["hey get rid of the {ambiguous} one", "ugh the {ambiguous} is wrong, fix it"],
+      terse: ["delete my {ambiguous}", "change my {ambiguous} to {newAmount}"],
+      plain: ["Delete my {ambiguous} transaction.", "Can you change my {ambiguous} expense to {newAmount}?"],
+      chatty: ["hey get rid of the {ambiguous} one", "ugh the {ambiguous} should be {newAmount}, fix it"],
     },
   },
   {
@@ -1112,7 +1112,9 @@ function fillScope(cell: Cell, slots: readonly SlotName[], gen: Gen): Scope {
     case "addTransaction":
     case "clarify": {
       if (cell.shape === "ambiguousTarget") {
-        scope.ambiguous = rng.pick(ambiguousDescriptions(data));
+        const ambiguous = rng.pick(ambiguousDescriptions(data));
+        scope.ambiguous = ambiguous;
+        if (uses("newAmount")) scope.newAmount = shiftedAmount(rng.pick(data.transactions.filter((tx) => sameName(tx.description, ambiguous))).amount, rng);
         break;
       }
       const category = pickCategory(gen, "expense");
@@ -1324,13 +1326,18 @@ function followUpKinds(parent: Turn, data: PromptData): FollowUpKind[] {
   return kinds;
 }
 
-const FOLLOWUP_EXPECT: Record<Exclude<FollowUpKind, "periodShift" | "categoryShift">, Expect> = {
+const FOLLOWUP_EXPECT: Record<Exclude<FollowUpKind, "periodShift" | "categoryShift" | "pickCandidate">, Expect> = {
   refine: { must: ["findTransactions"], forbid: WRITE_TOOLS },
   amountFix: { must: ["addTransaction", "updateTransaction"], forbid: [] },
   answerClarify: { must: ["addTransaction"], forbid: [] },
-  pickCandidate: { must: ["updateTransaction", "deleteTransaction"], forbid: [] },
   thanks: NO_TOOLS,
 };
+
+/** An edit-type parent carries the new amount; a delete-type parent has none. */
+function pickCandidateExpect(parent: Turn): Expect {
+  if (parent.scope.newAmount !== undefined) return { must: ["updateTransaction"], forbid: ["addTransaction", "deleteTransaction"] };
+  return { must: ["deleteTransaction"], forbid: ["addTransaction", "updateTransaction"] };
+}
 
 /** Replacing the slot that was wrong makes the scope valid again; any other change keeps the label. */
 function relabel(label: ScopeLabel, replaced: InvalidKind): ScopeLabel {
@@ -1386,7 +1393,8 @@ function makeFollowUp(gen: Gen, parent: Turn): Turn {
   }
   const pool = FOLLOWUP_TEMPLATES.filter((t) => t.kind === kind && (kind === "thanks" || t.slots.includes(required)));
   const template = rng.pick(pool);
-  const base = kind === "periodShift" || kind === "categoryShift" ? INTENT_EXPECT[intent] : FOLLOWUP_EXPECT[kind];
+  const base =
+    kind === "periodShift" || kind === "categoryShift" ? INTENT_EXPECT[intent] : kind === "pickCandidate" ? pickCandidateExpect(parent) : FOLLOWUP_EXPECT[kind];
   return finishTurn(
     gen,
     { intent, shape, kind: `followup:${kind}`, register: "any", scope, scopeLabel, expect: scopeLabel === "valid" ? base : NO_WRITES },

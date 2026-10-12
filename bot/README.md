@@ -478,7 +478,10 @@ Before a thread, when the log already holds messages, it clicks `New chat` at
 `ASSISTANT_NEW_CHAT_RATE`. After each turn a follow-up (`periodShift`,
 `categoryShift`, `refine`, `amountFix`, `answerClarify`, `pickCandidate`,
 `thanks`) comes at the archetype's chance, at most `ASSISTANT_FOLLOWUPS_MAX`
-per thread. Caps: `ASSISTANT_TURNS_PER_ACTION_MAX` per action,
+per thread. A `clarify/ambiguousTarget` opener either deletes ("delete my
+coffee") or names the new amount ("change my coffee to 4.50"), so its
+`pickCandidate` follow-up ("the one on Oct 3") completes the write: it must
+call `deleteTransaction` or `updateTransaction` respectively. Caps: `ASSISTANT_TURNS_PER_ACTION_MAX` per action,
 `ASSISTANT_TURNS_PER_SESSION_MAX` per session, `ASSISTANT_TURNS_PER_RUN_MAX` per
 run (an in-memory counter; reaching it logs `skipped:askAssistant (run turn
 cap)` and stops the assistant for the rest of the run).

@@ -540,7 +540,7 @@ const CELL_SLOTS: Record<string, { required: SlotName[]; optional: SlotName[] }>
   "vague/none": { required: [], optional: ["period"] },
   "clarify/missingAmount": { required: ["description"], optional: [] },
   "clarify/missingWhat": { required: ["amount"], optional: [] },
-  "clarify/ambiguousTarget": { required: ["ambiguous"], optional: [] },
+  "clarify/ambiguousTarget": { required: ["ambiguous"], optional: ["newAmount"] },
 };
 
 check("the bank has the 28 cells in intent x shape order", () => {
@@ -992,6 +992,7 @@ check("new visitors never get cells an empty workspace cannot fill; the fallback
 
 check("follow-ups keep validity labels and expectations honest, and every follow-up kind is reachable", () => {
   const kinds = new Set<string>();
+  const pickParents = new Set<string>();
   for (const persona of PERSONAS) {
     const data = assistantData(persona);
     for (let i = 0; i < 60; i++) {
@@ -1006,7 +1007,12 @@ check("follow-ups keep validity labels and expectations honest, and every follow
             const parent = thread.turns[index - 1];
             if (turn.kind === "followup:thanks") assert.deepStrictEqual(turn.expect, NO_TOOLS);
             if (turn.kind === "followup:answerClarify") assert.ok(["missingAmount", "missingWhat"].includes(parent.shape), parent.shape);
-            if (turn.kind === "followup:pickCandidate") assert.strictEqual(parent.shape, "ambiguousTarget");
+            if (turn.kind === "followup:pickCandidate") {
+              assert.strictEqual(parent.shape, "ambiguousTarget");
+              const edit = parent.scope.newAmount !== undefined;
+              assert.deepStrictEqual(turn.expect.must, [edit ? "updateTransaction" : "deleteTransaction"], `"${parent.text}" -> "${turn.text}"`);
+              pickParents.add(edit ? "edit" : "delete");
+            }
             if (turn.kind === "followup:amountFix") assert.strictEqual(parent.intent, "addTransaction");
             if (turn.scopeLabel === "valid" && turn.kind === "followup:refine") assert.deepStrictEqual(turn.expect.must, ["findTransactions"]);
           });
@@ -1015,6 +1021,14 @@ check("follow-ups keep validity labels and expectations honest, and every follow
     }
   }
   assert.deepStrictEqual([...kinds].sort(), FOLLOWUP_KINDS.map((kind) => `followup:${kind}`).sort());
+  assert.deepStrictEqual([...pickParents].sort(), ["delete", "edit"]);
+});
+
+check("an ambiguous-target opener either deletes or names the new amount, so its pickCandidate can finish the write", () => {
+  for (const t of OPENER_TEMPLATES.filter((template) => template.shape === "ambiguousTarget")) {
+    const deletes = /\b(delete|get rid|remove)\b/i.test(t.text);
+    assert.notStrictEqual(deletes, t.slots.includes("newAmount"), `"${t.text}" must either delete or carry {newAmount}`);
+  }
 });
 
 check("register, typo and slot rules hold per archetype, and style is stable per persona (AC9)", () => {
