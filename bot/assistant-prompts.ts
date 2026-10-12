@@ -166,11 +166,11 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "incomeSummary",
     shape: "category",
     templates: {
-      terse: ["income from {category} {period}", "earned from {category} {period}", "{category} total {period}"],
+      terse: ["income from {category} {period}", "earned from {category} {period}", "{category} earnings {period}"],
       plain: [
         "How much did I earn from {category} {period}?",
         "How much did {category} earn me {period}?",
-        "How much income did I get from {category} {period}?",
+        "What did {category} pay me {period}?",
       ],
       chatty: [
         "hey, how much came in from {category} {period}?",
@@ -279,7 +279,7 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "editTransaction",
     shape: "amount",
     templates: {
-      terse: ["{target} should be {newAmount}", "change {target} to {newAmount}"],
+      terse: ["{target} should be {newAmount}", "fix {target}: {newAmount}"],
       plain: ["Change {target} to {newAmount}.", "Can you update the amount of {target} to {newAmount}?"],
       chatty: ["oops, {target} was actually {newAmount}, can you fix it?", "hey I typed {target} wrong, make it {newAmount}"],
     },
@@ -313,7 +313,7 @@ const OPENER_BANK: readonly CellBank[] = [
     shape: "target",
     templates: {
       terse: ["delete {target}", "remove {target}", "get rid of {target}", "{target} is a mistake, delete"],
-      plain: ["Delete {target}.", "Please remove {target}.", "Can you delete {target}? It was a mistake.", "I want to delete {target}."],
+      plain: ["Please delete {target} from my transactions.", "Please remove {target}.", "Can you delete {target}? It was a mistake.", "I want to delete {target}."],
       chatty: [
         "hey can you nuke {target}? didn't happen",
         "oops, {target} is a duplicate, delete it pls",
@@ -326,7 +326,7 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "vague",
     shape: "none",
     templates: {
-      terse: ["how am I doing", "money check", "status {period}", "am I ok {period}", "budget health", "overview"],
+      terse: ["doing ok?", "money check", "status {period}", "am I ok {period}", "budget health", "overview"],
       plain: [
         "How am I doing money-wise?",
         "Am I doing okay financially {period}?",
@@ -336,7 +336,7 @@ const OPENER_BANK: readonly CellBank[] = [
         "What should I know about my money {period}?",
       ],
       chatty: [
-        "hey so how am I doing money-wise, honestly?",
+        "hey so honestly, is my money stuff in good shape?",
         "I have no idea where I stand, help me out",
         "ok am I broke or am I fine {period}?",
         "vibe check on my finances pls",
@@ -368,7 +368,7 @@ const OPENER_BANK: readonly CellBank[] = [
     shape: "ambiguousTarget",
     templates: {
       terse: ["delete my {ambiguous}", "change my {ambiguous} to {newAmount}"],
-      plain: ["Delete my {ambiguous} transaction.", "Can you change my {ambiguous} expense to {newAmount}?"],
+      plain: ["Please remove the {ambiguous} one I added.", "Can you change my {ambiguous} expense to {newAmount}?"],
       chatty: ["hey get rid of the {ambiguous} one", "ugh the {ambiguous} should be {newAmount}, fix it"],
     },
   },
@@ -509,8 +509,8 @@ const FOLLOWUP_BANK: Record<BankedFollowUpKind, readonly string[]> = {
   categoryShift: ["what about {category}?", "and {category}?", "now {category}", "same for {category}", "how about {category}?", "ok and {category}", "{category} too?"],
   refine: ["just the top {limit}", "only show {limit}", "limit it to {limit}", "give me only {limit}", "top {limit} only", "can you cut that to {limit}?", "just {limit} please"],
   amountFix: ["actually make it {amount}", "wait, it was {amount}", "sorry, change that to {amount}", "oops, {amount} not that", "correction: {amount}", "make that {amount} instead", "no it was {amount}"],
-  answerClarify: ["{amount}", "it was {amount}", "{amount} I think", "about {amount}", "it was {description}, {category}", "for {description}", "{description} in {category}", "oh it was {description}"],
-  pickCandidate: ["the one on {candidate}", "{candidate}", "the {candidate} one", "I mean {candidate}", "the one from {candidate}", "{candidate} please"],
+  answerClarify: ["{amount}", "it was {amount}", "{amount} I think", "about {amount}", "that was {description}, file under {category}", "for {description}", "{description} in {category}", "oh, it's for {description}"],
+  pickCandidate: ["the one on {candidate}", "{candidate}", "go with {candidate}", "I mean {candidate}", "the one from {candidate}", "{candidate} please"],
   thanks: ["thanks", "ok cool", "thank you!", "great, thanks", "perfect", "got it", "nice one", "cheers"],
 };
 

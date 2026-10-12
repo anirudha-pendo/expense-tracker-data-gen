@@ -88,7 +88,7 @@ import {
   type TypingStep,
   type Verdict,
 } from "./assistant-prompts";
-import { DEFAULT_CATEGORY_SEEDS, PERSONA_PASSWORD } from "./seed-data";
+import { CUSTOM_CATEGORY_SEEDS, DEFAULT_CATEGORY_SEEDS, PERSONA_PASSWORD, type CategorySeed } from "./seed-data";
 
 let checksPassed = 0;
 
@@ -1639,6 +1639,132 @@ check("abandonPrefix types a strict prefix of 30-70% of the prompt, at least 3 c
   assert.ok(typed > 900, `only ${typed} prompts longer than 3 characters`);
   const lengths = Array.from({ length: 200 }, () => abandonPrefix("x".repeat(40), rng).length);
   assert.ok(Math.min(...lengths) <= 13 && Math.max(...lengths) >= 27, `prefix lengths ${Math.min(...lengths)}-${Math.max(...lengths)} do not spread over 30-70%`);
+});
+
+/** A template's wording for comparison: first option of each [a|b], slots dropped, lowercase, punctuation stripped. */
+function bankWords(text: string): Set<string> {
+  const words = text
+    .replace(/\[([^|\]]*)(?:\|[^\]]*)+\]/g, "$1")
+    .replace(/\{[A-Za-z]+\}/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+  return new Set(words);
+}
+
+function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  const shared = [...a].filter((word) => b.has(word)).length;
+  return shared / (a.size + b.size - shared);
+}
+
+/** Opener templates per cell, follow-up templates per kind: the groups whose wordings must differ. */
+function bankGroups(): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  const add = (key: string, text: string): void => {
+    groups.set(key, [...(groups.get(key) ?? []), text]);
+  };
+  for (const t of OPENER_TEMPLATES) add(`${t.intent}/${t.shape}`, t.text);
+  for (const t of FOLLOWUP_TEMPLATES) add(`followup:${t.kind}`, t.text);
+  return groups;
+}
+
+check("jaccard and bankWords compare wordings the way D4 defines it", () => {
+  assert.deepStrictEqual([...bankWords("I [spent a lot|went overboard] on {category}, what's the total?")], ["i", "spent", "a", "lot", "on", "whats", "the", "total"]);
+  assert.strictEqual(bankWords("{category} {range}").size, 0);
+  assert.strictEqual(jaccard(bankWords("delete {target}"), bankWords("Delete {target}.")), 1);
+  assert.strictEqual(jaccard(bankWords("{amount}"), bankWords("{candidate}")), 1);
+  assert.strictEqual(jaccard(bankWords("and {period}?"), bankWords("ok and {period}")), 0.5);
+});
+
+check("templates in one cell or follow-up kind differ in wording: Jaccard at most 0.6, one slot-only at most, no duplicate anywhere (AD8)", () => {
+  for (const [key, texts] of bankGroups()) {
+    assert.ok(texts.filter((text) => bankWords(text).size === 0).length <= 1, `${key} has more than one slot-only template`);
+    for (let i = 0; i < texts.length; i++) {
+      for (let j = i + 1; j < texts.length; j++) {
+        const similarity = jaccard(bankWords(texts[i]), bankWords(texts[j]));
+        assert.ok(similarity <= 0.6, `${key}: "${texts[i]}" and "${texts[j]}" are ${similarity.toFixed(2)} alike`);
+      }
+    }
+  }
+  const all = [...OPENER_TEMPLATES, ...FOLLOWUP_TEMPLATES].map((t) => t.text);
+  assert.deepStrictEqual(all.filter((text, i) => all.indexOf(text) !== i), [], "duplicate templates");
+});
+
+const SWEEP_SEEDS: readonly CategorySeed[] = [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS];
+const SWEEP_EXPENSE = SWEEP_SEEDS.filter((seed) => seed.scope !== "income");
+const SWEEP_INCOME = SWEEP_SEEDS.filter((seed) => seed.scope !== "expense");
+const SWEEP_DESCRIPTIONS = SWEEP_SEEDS.flatMap((seed) => seed.descriptions.map((d) => d.toLowerCase()));
+const SWEEP_EXPENSE_DESCRIPTIONS = SWEEP_EXPENSE.flatMap((seed) => seed.descriptions.map((d) => d.toLowerCase()));
+/** Every label buildPeriod and invalidPeriod can produce, one month name standing in for all twelve. */
+const SWEEP_PERIODS = ["this month", "last month", "in July", "in the last 30 days", "this week", "today", "yesterday", "since June", "this year", "in 2019", "next month"];
+
+/** Every value a slot can take in a real turn; income-only categories only where the template's intent is incomeSummary. */
+function slotVariants(slot: SlotName, income: boolean): string[] {
+  switch (slot) {
+    case "category":
+      return (income ? SWEEP_INCOME : SWEEP_EXPENSE).map((seed) => seed.name);
+    case "newCategory":
+      return SWEEP_EXPENSE.map((seed) => seed.name);
+    case "period":
+      return SWEEP_PERIODS;
+    case "description":
+      return SWEEP_EXPENSE_DESCRIPTIONS;
+    case "ambiguous":
+      return SWEEP_DESCRIPTIONS;
+    case "text":
+      return SWEEP_DESCRIPTIONS.map(searchText);
+    case "target":
+      return SWEEP_EXPENSE_DESCRIPTIONS.flatMap((d) => [`the ${d} on Sep 3`, `yesterday's ${d}`]);
+    case "date":
+      return ["yesterday", "on Sep 2"];
+    case "order":
+      return ["biggest", "largest", "smallest", "cheapest"];
+    case "range":
+      return ["over 40", "under 40", "between 20 and 40"];
+    case "limit":
+      return ["3", "5", "10"];
+    case "amount":
+    case "newAmount":
+      return ["12.50", "15"];
+    case "newDate":
+    case "candidate":
+      return ["Sep 1"];
+  }
+}
+
+/** Expands every [a|b] group, so each wording is checked, not one random pick. */
+function expandAlternation(text: string): string[] {
+  const match = /\[([^[\]]*)\]/.exec(text);
+  if (match === null) return [text];
+  return match[1].split("|").flatMap((option) => expandAlternation(text.slice(0, match.index) + option + text.slice(match.index + match[0].length)));
+}
+
+const PERIOD_AFTER_PREPOSITION = /\b(?:for|show) (?:in|since|today|yesterday|this|last|next)\b|\b(?:in|on|from|to|of|at|by|during|since) (?:in|since)\b/i;
+
+check("every template reads right with every value its slots can take: no doubled word, no preposition before a period", () => {
+  const templates: { text: string; slots: readonly SlotName[]; income: boolean }[] = [
+    ...OPENER_TEMPLATES.map((t) => ({ text: t.text, slots: t.slots, income: t.intent === "incomeSummary" })),
+    ...FOLLOWUP_TEMPLATES.map((t) => ({ text: t.text, slots: t.slots, income: false })),
+  ];
+  let rendered = 0;
+  for (const template of templates) {
+    const base: SlotValues = {};
+    for (const slot of template.slots) base[slot] = slotVariants(slot, template.income)[0];
+    for (const wording of expandAlternation(template.text)) {
+      for (const slot of template.slots) {
+        for (const value of slotVariants(slot, template.income)) {
+          const parts = renderTemplate(wording, { ...base, [slot]: value }, makeRng("sweep"));
+          const text = parts.map((part) => part.text).join("");
+          assert.strictEqual(templateDoubledWord(parts), null, `"${template.text}" doubles a word as "${text}"`);
+          assert.ok(!PERIOD_AFTER_PREPOSITION.test(text), `"${template.text}" puts a preposition before its period: "${text}"`);
+          rendered++;
+        }
+      }
+    }
+  }
+  assert.ok(rendered > 5000, `only ${rendered} renders`);
 });
 
 // --- Summary -----------------------------------------------------------------
