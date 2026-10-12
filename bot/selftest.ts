@@ -70,6 +70,7 @@ import {
   templateSlots,
   verdict,
   type AssistantPlanner,
+  type Cell,
   type Expect,
   type Intent,
   type Part,
@@ -1773,6 +1774,11 @@ const CELL_FLOORS: Record<string, { perRegister: number; total: number }> = {
   "spendSummary/category": { perRegister: 5, total: 15 },
   "incomeSummary/all": { perRegister: 5, total: 15 },
   "incomeSummary/category": { perRegister: 5, total: 15 },
+  "findTransactions/category": { perRegister: 5, total: 15 },
+  "findTransactions/text": { perRegister: 5, total: 15 },
+  "findTransactions/amountRange": { perRegister: 5, total: 15 },
+  "topTransactions/all": { perRegister: 5, total: 15 },
+  "topTransactions/category": { perRegister: 5, total: 15 },
 };
 
 check("every opener cell meets its D4 template floor (AD8)", () => {
@@ -1782,6 +1788,28 @@ check("every opener cell meets its D4 template floor (AD8)", () => {
     for (const register of STYLE_REGISTERS) {
       const n = templates.filter((t) => t.register === register).length;
       assert.ok(n >= floor.perRegister, `${key} has ${n} ${register} templates, needs ${floor.perRegister}`);
+    }
+  }
+});
+
+check("one power and one casual persona see many wordings of one question, none above 25% (AD9)", () => {
+  const forced: Cell[] = [
+    { intent: "spendSummary", shape: "category" },
+    { intent: "findTransactions", shape: "category" },
+  ];
+  for (const persona of [personasOf("power")[0], personasOf("casual")[0]]) {
+    for (const cell of forced) {
+      // A plan date whose focus cell is this one; focus share 1 then puts every opener in it.
+      const planNow = new Date(CELLS.findIndex((c) => c.intent === cell.intent && c.shape === cell.shape) * 86_400_000);
+      const counts = new Map<string, number>();
+      for (let i = 0; i < 300; i++) {
+        const turn = firstOpener(createAssistantPlanner({ ...plannerInput(persona, `wording:${cell.intent}:${i}`), planNow, focusShare: 1 }));
+        assert.ok(isCell(turn, cell), `${persona.username} drew ${turn.intent}/${turn.shape}`);
+        counts.set(turn.template, (counts.get(turn.template) ?? 0) + 1);
+      }
+      const label = `${persona.archetype} ${cell.intent}/${cell.shape}`;
+      assert.ok(counts.size >= 8, `${label} used only ${counts.size} templates`);
+      assert.ok(Math.max(...counts.values()) <= 75, `${label}: one template took ${Math.max(...counts.values())} of 300`);
     }
   }
 });

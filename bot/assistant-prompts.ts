@@ -231,11 +231,26 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "findTransactions",
     shape: "category",
     templates: {
-      terse: ["{category} transactions {period}", "list {category} {period}"],
-      plain: ["Show me my {category} transactions {period}.", "Can you list what I spent on {category} {period}?"],
+      terse: [
+        "{category} transactions {period}",
+        "list {category} {period}",
+        "show {category} {period}",
+        "{category} purchases {period}",
+        "every {category} item {period}",
+      ],
+      plain: [
+        "Show me my {category} transactions {period}.",
+        "Can you list what I spent on {category} {period}?",
+        "Which {category} purchases did I make {period}?",
+        "I'd like to see all my {category} spending {period}.",
+        "Please find each {category} payment {period}.",
+      ],
       chatty: [
         "hey can you pull up my {category} stuff {period}?",
         "I want to see every {category} purchase {period}, can you show me?",
+        "where did all my {category} money go {period}? show me the list",
+        "mind listing out the {category} things I bought {period}?",
+        "ok let me see my {category} receipts {period}",
       ],
     },
   },
@@ -243,11 +258,26 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "findTransactions",
     shape: "text",
     templates: {
-      terse: ["find {text}", "{text} transactions {period}"],
-      plain: ["Show me my {text} transactions.", "Can you find everything with {text} in it {period}?"],
+      terse: [
+        "find {text}",
+        "{text} transactions {period}",
+        "search {text}",
+        "{text} purchases {period}",
+        "every {text} entry",
+      ],
+      plain: [
+        "Show me my {text} transactions.",
+        "Can you find everything with {text} in it {period}?",
+        "Which transactions mention {text}?",
+        "List every {text} purchase {period}.",
+        "Where did I pay for {text} {period}?",
+      ],
       chatty: [
         "hey where are all my {text} purchases? show me",
         "trying to find my {text} payments {period}, can you dig them up?",
+        "how many times did I buy {text} {period}? list them pls",
+        "can you hunt down every {text} charge for me?",
+        "I swear I paid for {text} a bunch {period}, show me",
       ],
     },
   },
@@ -255,11 +285,26 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "findTransactions",
     shape: "amountRange",
     templates: {
-      terse: ["{category} {range}", "{category} purchases {range} {period}"],
-      plain: ["Show me {category} transactions {range}.", "Which {category} transactions were {range} {period}?"],
+      terse: [
+        "{category} {range}",
+        "{category} purchases {range} {period}",
+        "list {category} {range}",
+        "{category} items {range} {period}",
+        "find {category} spends {range}",
+      ],
+      plain: [
+        "Show me {category} transactions {range}.",
+        "Which {category} transactions were {range} {period}?",
+        "List my {category} purchases {range}.",
+        "Can you find {category} spending {range} {period}?",
+        "I need every {category} payment {range}.",
+      ],
       chatty: [
         "hey, any {category} spends {range}? list them",
         "can you show me the {category} stuff that was {range} {period}?",
+        "curious which {category} buys came in {range} {period}",
+        "pull up anything in {category} that cost {range} pls",
+        "ok what {category} charges do I have {range}?",
       ],
     },
   },
@@ -267,11 +312,26 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "topTransactions",
     shape: "all",
     templates: {
-      terse: ["top {limit} {order} expenses {period}", "{order} purchases {period}"],
-      plain: ["What were my {limit} {order} expenses {period}?", "Show me my {order} purchases {period}."],
+      terse: [
+        "top {limit} {order} expenses {period}",
+        "{order} purchases {period}",
+        "{limit} {order} spends {period}",
+        "{order} expense {period}",
+        "{order} buys",
+      ],
+      plain: [
+        "What were my {limit} {order} expenses {period}?",
+        "Show me my {order} purchases {period}.",
+        "Which purchase was my {order} {period}?",
+        "List my {limit} {order} transactions {period}.",
+        "Can you show the {limit} {order} payments I made {period}?",
+      ],
       chatty: [
         "hey what were the {order} things I bought {period}?",
         "ok show me my top {limit} {order} spends {period}, I'm scared",
+        "be honest, what's the {order} thing I bought {period}?",
+        "curious about my {limit} {order} payments {period}, list them?",
+        "which of my purchases were the {order} {period}? top {limit} pls",
       ],
     },
   },
@@ -279,14 +339,26 @@ const OPENER_BANK: readonly CellBank[] = [
     intent: "topTransactions",
     shape: "category",
     templates: {
-      terse: ["{order} {category} purchases {period}", "{limit} {order} in {category} {period}"],
+      terse: [
+        "{order} {category} purchases {period}",
+        "{limit} {order} in {category} {period}",
+        "top {limit} {order} {category} buys",
+        "{order} {category} spend {period}",
+        "{order} single {category} charge {period}",
+      ],
       plain: [
         "What were my {limit} {order} {category} purchases {period}?",
         "Which {category} purchase was the {order} {period}?",
+        "Show me my {order} {category} transactions {period}.",
+        "Can you list the {limit} {order} things I bought in {category}?",
+        "In {category}, what was my {order} expense {period}?",
       ],
       chatty: [
         "curious, what's the {order} thing I bought in {category} {period}?",
         "hey list my {limit} {order} {category} spends {period} pls",
+        "so in {category}, what were my {limit} {order} buys {period}?",
+        "wanna see my {order} {category} payments {period}, can you pull them?",
+        "be honest, which {category} charge was the {order} {period}?",
       ],
     },
   },
@@ -1035,6 +1107,8 @@ export interface Turn {
   /** The scope's period kind, or "-" when the turn names none. */
   period: string;
   expect: Expect;
+  /** The bank string this turn was rendered from, so a wrong answer can be traced to its wording. */
+  template: string;
   /** Exactly what the composer holds when the turn is sent. */
   text: string;
   typing: TypingStep[];
@@ -1272,7 +1346,7 @@ function slotValues(scope: Scope, data: PromptData, rng: Rng): SlotValues {
   return values;
 }
 
-type TurnBase = Omit<Turn, "text" | "typing" | "typo" | "rendered" | "charDelayMs" | "send" | "period">;
+type TurnBase = Omit<Turn, "template" | "text" | "typing" | "typo" | "rendered" | "charDelayMs" | "send" | "period">;
 
 function finishTurn(gen: Gen, base: TurnBase, template: string): Turn {
   const parts = renderTemplate(template, slotValues(base.scope, gen.data, gen.rng), gen.rng);
@@ -1281,6 +1355,7 @@ function finishTurn(gen: Gen, base: TurnBase, template: string): Turn {
   return {
     ...base,
     ...styled,
+    template,
     period: base.scope.period === undefined ? "-" : base.scope.period.kind,
     rendered: parts,
     charDelayMs: gen.rng.int(gen.knobs.charDelayMs.min, gen.knobs.charDelayMs.max),
