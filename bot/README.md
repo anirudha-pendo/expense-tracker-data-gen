@@ -137,7 +137,7 @@ what they affect.
 | `QUICK_ADD_SHORTCUT_RATE` (0.5) | The quick-add palette is opened with Ctrl+K rather than the header button. | 0–1. |
 | `ASSISTANT_SHORTCUT_RATE` (0.3) | The assistant panel is opened with Ctrl+J rather than the header button. | 0–1. |
 | `ASSISTANT_CONFIRM_RATE` (0.75) | An assistant confirm card is confirmed rather than cancelled. | 0–1. |
-| `ASSISTANT_FOCUS_SHARE` (0.15) | An assistant opener uses the day's focus cell instead of the archetype's intent mix (see "Assistant prompts"). | 0.05–0.3. 0 stops the 28-day coverage guarantee. |
+| `ASSISTANT_FOCUS_SHARE` (0.15) | An assistant opener uses the day's focus cell instead of the archetype's intent mix (see "Assistant prompts"). | 0.05–0.3. 0 stops the daily focus cell, so rare cells get only their mix share. |
 | `ASSISTANT_SECOND_THREAD_RATE` (0.25) | One `askAssistant` starts a second topic after the first. | 0–0.5. |
 | `ASSISTANT_NEW_CHAT_RATE` (0.6) | `New chat` is clicked before a thread when the conversation already holds messages. | 0–1. |
 | `INSIGHTS_SCROLL_RATE` (0.7) | An insights dwell pause is preceded by a scroll. | 0–1. |
@@ -470,7 +470,12 @@ the session's action RNG and never from a model reply, so the k-th turn of a
 session is the same in two runs with the same `BOT_NOW` on the same day. There
 is no stored state: each UTC day (from the plan clock, so `BOT_NOW` moves it)
 favours one cell, `CELLS[day mod 28]`, for `ASSISTANT_FOCUS_SHARE` of openers,
-so every cell is exercised at least once every 28 days.
+so every cell is favoured on one day in every 28. Favoured is not guaranteed:
+the focus cell still has to be drawn. On a weekday dozens of openers make that
+near certain; a weekend day has only 1–5 sessions (about 15 openers, about 1.8
+expected focus hits after the share and eligibility), so roughly one weekend
+focus day in six passes without its cell. The selftest checks that every cell
+appears at 400 openers a day, not at weekend volume.
 
 ### Threads, follow-ups and caps
 
