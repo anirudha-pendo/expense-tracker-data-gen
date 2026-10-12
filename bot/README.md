@@ -482,7 +482,7 @@ One `askAssistant` runs one thread, or two at `ASSISTANT_SECOND_THREAD_RATE`.
 Before a thread, when the log already holds messages, it clicks `New chat` at
 `ASSISTANT_NEW_CHAT_RATE`. After each turn a follow-up (`periodShift`,
 `categoryShift`, `refine`, `amountFix`, `answerClarify`, `pickCandidate`,
-`thanks`) comes at the archetype's `followUp` chance, at most its
+`thanks`, `nextQuestion`) comes at the archetype's `followUp` chance, at most its
 `followUpsMax` per thread (`ARCHETYPE_STYLE` in `assistant-prompts.ts`):
 
 | | power | regular | casual | explorer | churning |
@@ -490,7 +490,12 @@ Before a thread, when the log already holds messages, it clicks `New chat` at
 | `followUp` (chance after each turn) | 0.75 | 0.65 | 0.35 | 0.20 | 0.10 |
 | `followUpsMax` (per thread) | 5 | 4 | 2 | 1 | 1 |
 
-New visitors use the `explorer` row. `thanks` ends a thread.
+New visitors use the `explorer` row. The kind is drawn uniformly from those
+that fit the previous turn. `thanks` ends a thread. `nextQuestion` fits after
+any turn: it is a fresh opener (same mix, focus cell, invalid-scope rate and
+style as an opener) logged as `kind=followup:nextQuestion` with that opener's
+own intent, shape, scope and expectation. It is what lets a chat that opened
+with a write or an off-path question keep going.
 
 A `clarify/ambiguousTarget` opener either deletes ("delete my
 coffee") or names the new amount ("change my coffee to 4.50"), so its

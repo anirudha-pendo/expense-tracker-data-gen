@@ -38,6 +38,7 @@ import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, fo
 import { buildIdentifyOptions } from "../src/lib/analytics";
 import {
   ARCHETYPE_STYLE,
+  BANKED_FOLLOWUP_KINDS,
   CELLS,
   FOLLOWUP_KINDS,
   FOLLOWUP_TEMPLATES,
@@ -586,7 +587,7 @@ check("bank sizes meet the spec minimums (AC2)", () => {
   assert.ok(count((t) => t.intent === "vague") >= 15, "vague needs 15");
   assert.ok(count((t) => t.intent === "adviceRefusal") >= 12, "adviceRefusal needs 12");
   assert.ok(count((t) => t.intent === "offTopic") >= 30, "offTopic needs 30");
-  for (const kind of FOLLOWUP_KINDS) {
+  for (const kind of BANKED_FOLLOWUP_KINDS) {
     assert.ok(FOLLOWUP_TEMPLATES.filter((t) => t.kind === kind).length >= 6, `follow-up ${kind} needs 6`);
   }
   assert.ok(OPENER_TEMPLATES.length + FOLLOWUP_TEMPLATES.length >= 250, "the bank needs 250 templates in total");
@@ -1539,6 +1540,79 @@ check("follow-up chance and per-thread cap match the D3 table; caps are 6 per ac
     (name) => /\.(?:ts|md)$/.test(name) && name !== "selftest.ts" && readFileSync(path.join(BOT_DIR, name), "utf8").includes(removed),
   );
   assert.deepStrictEqual(stale, [], `${removed} is still named`);
+});
+
+check("chat length per archetype: power chats longest, churning shortest, explorers mostly stop at one turn (AD5)", () => {
+  const means: number[] = [];
+  const single = new Map<Archetype, number>();
+  let powerLongest = 0;
+  for (const archetype of ARCHETYPE_LIST) {
+    const members = personasOf(archetype);
+    let threads = 0;
+    let turns = 0;
+    let singles = 0;
+    // The first action of a fresh session, so an earlier action's turns never shorten this one.
+    for (let i = 0; i < 10000; i++) {
+      for (const thread of plannerFor(members[i % members.length], `length:${archetype}:${i}`).nextAction().threads) {
+        threads++;
+        turns += thread.turns.length;
+        if (thread.turns.length === 1) singles++;
+        if (archetype === "power") powerLongest = Math.max(powerLongest, thread.turns.length);
+      }
+    }
+    means.push(turns / threads);
+    single.set(archetype, singles / threads);
+  }
+  const [power, regular, casual, explorer, churning] = means;
+  const shown = means.map((mean, i) => `${ARCHETYPE_LIST[i]} ${mean.toFixed(2)}`).join(", ");
+  assert.ok(power >= 2.2 && regular >= 1.9 && casual >= 1.2 && casual <= 1.7 && explorer <= 1.35 && churning <= 1.2, shown);
+  assert.ok(power > regular && regular > casual && casual > explorer && explorer > churning, shown);
+  assert.ok((single.get("explorer") ?? 0) >= 0.7, `explorer single-turn share ${single.get("explorer")}`);
+  assert.ok((single.get("power") ?? 1) <= 0.4, `power single-turn share ${single.get("power")}`);
+  assert.strictEqual(powerLongest, 1 + ARCHETYPE_STYLE.power.followUpsMax);
+});
+
+check("nextQuestion follows every parent intent and is labelled and judged like an opener (AD7)", () => {
+  const parents = new Set<Intent>();
+  let answeredAfterNext = 0;
+  let threads = 0;
+  for (let i = 0; threads < 10000; i++) {
+    const persona = PERSONAS[i % PERSONAS.length];
+    const data = assistantData(persona);
+    for (const thread of plannerFor(persona, `next:${i}`).nextAction().threads) {
+      threads++;
+      thread.turns.forEach((turn, index) => {
+        if (index === 0) return;
+        const parent = thread.turns[index - 1];
+        if (turn.kind === "followup:answerClarify" || turn.kind === "followup:pickCandidate") {
+          assert.ok(parent.kind === "opener" || parent.kind === "followup:nextQuestion", `${turn.kind} after ${parent.kind}`);
+          if (parent.kind === "followup:nextQuestion") answeredAfterNext++;
+        }
+        if (turn.kind !== "followup:nextQuestion") return;
+        parents.add(parent.intent);
+        assert.strictEqual(isScopeValid(turn.scope, data), turn.scopeLabel === "valid", `${turn.scopeLabel} nextQuestion "${turn.text}"`);
+        assert.deepStrictEqual(turn.expect, turn.scopeLabel === "valid" ? INTENT_EXPECT[turn.intent] : NO_WRITES, turn.text);
+      });
+    }
+  }
+  assert.deepStrictEqual([...parents].sort(), [...INTENTS].sort());
+  assert.ok(answeredAfterNext > 0, "a clarify asked as a nextQuestion never got its answer");
+});
+
+check("a new visitor's whole session, follow-ups included, never needs data an empty workspace lacks", () => {
+  const data = newVisitorPromptData(TEST_NOW);
+  let followUps = 0;
+  for (let i = 0; i < 2000; i++) {
+    const planner = createAssistantPlanner({ sessionSeed: `nv-all:${i}`, styleKey: `nv-all:${i}`, archetype: "explorer", mix: INTENT_MIX.explorer, data, planNow: TEST_NOW, focusShare: ASSISTANT_FOCUS_SHARE });
+    for (const turn of sessionTurns(planner)) {
+      if (turn.kind !== "opener") followUps++;
+      assert.ok(!["editTransaction", "deleteTransaction"].includes(turn.intent), `new visitor got ${turn.kind} ${turn.intent}`);
+      assert.ok(!(turn.intent === "clarify" && turn.shape === "ambiguousTarget"), turn.text);
+      assert.ok(!(turn.intent === "findTransactions" && (turn.shape === "text" || turn.shape === "amountRange")), turn.text);
+      assert.strictEqual(isScopeValid(turn.scope, data), turn.scopeLabel === "valid", turn.text);
+    }
+  }
+  assert.ok(followUps > 0);
 });
 
 // --- Summary -----------------------------------------------------------------

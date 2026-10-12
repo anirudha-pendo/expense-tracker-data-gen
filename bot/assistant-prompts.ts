@@ -498,10 +498,13 @@ const OPENER_BANK: readonly CellBank[] = [
   },
 ];
 
-export const FOLLOWUP_KINDS = ["periodShift", "categoryShift", "refine", "amountFix", "answerClarify", "pickCandidate", "thanks"] as const;
+export const FOLLOWUP_KINDS = ["periodShift", "categoryShift", "refine", "amountFix", "answerClarify", "pickCandidate", "thanks", "nextQuestion"] as const;
 export type FollowUpKind = (typeof FOLLOWUP_KINDS)[number];
+/** nextQuestion reuses the opener bank, so it has no follow-up templates of its own. */
+export type BankedFollowUpKind = Exclude<FollowUpKind, "nextQuestion">;
+export const BANKED_FOLLOWUP_KINDS: readonly BankedFollowUpKind[] = FOLLOWUP_KINDS.filter((kind): kind is BankedFollowUpKind => kind !== "nextQuestion");
 
-const FOLLOWUP_BANK: Record<FollowUpKind, readonly string[]> = {
+const FOLLOWUP_BANK: Record<BankedFollowUpKind, readonly string[]> = {
   periodShift: ["and {period}?", "what about {period}?", "same thing {period}", "how about {period}?", "ok now {period}", "same question {period}", "{period} instead?"],
   categoryShift: ["what about {category}?", "and {category}?", "now {category}", "same for {category}", "how about {category}?", "ok and {category}", "{category} too?"],
   refine: ["just the top {limit}", "only show {limit}", "limit it to {limit}", "give me only {limit}", "top {limit} only", "can you cut that to {limit}?", "just {limit} please"],
@@ -520,7 +523,7 @@ export interface Template {
 }
 
 export interface FollowUpTemplate {
-  kind: FollowUpKind;
+  kind: BankedFollowUpKind;
   text: string;
   slots: readonly SlotName[];
 }
@@ -550,7 +553,7 @@ export const OPENER_TEMPLATES: readonly Template[] = OPENER_BANK.flatMap((entry)
   ),
 );
 
-export const FOLLOWUP_TEMPLATES: readonly FollowUpTemplate[] = FOLLOWUP_KINDS.flatMap((kind) =>
+export const FOLLOWUP_TEMPLATES: readonly FollowUpTemplate[] = BANKED_FOLLOWUP_KINDS.flatMap((kind) =>
   FOLLOWUP_BANK[kind].map((text) => ({ kind, text, slots: templateSlots(text) })),
 );
 
@@ -1318,18 +1321,23 @@ function candidateFor(parent: Turn, data: PromptData): PromptTransaction | undef
   return data.transactions.find((tx) => sameName(tx.description, ambiguous) && counts.get(pairKey(tx)) === 1);
 }
 
+/** An opener, or a nextQuestion that asked a fresh one; an answer to a clarify is neither, so it is never answered twice. */
+function asksAfresh(turn: Turn): boolean {
+  return turn.kind === "opener" || turn.kind === "followup:nextQuestion";
+}
+
 function followUpKinds(parent: Turn, data: PromptData): FollowUpKind[] {
-  const kinds: FollowUpKind[] = ["thanks"];
+  const kinds: FollowUpKind[] = ["thanks", "nextQuestion"];
   if (SUMMARY_INTENTS.includes(parent.intent)) kinds.push("periodShift");
   if (CATEGORY_SHIFT_INTENTS.includes(parent.intent)) kinds.push("categoryShift");
   if (parent.intent === "findTransactions" || parent.intent === "topTransactions") kinds.push("refine");
   if (parent.intent === "addTransaction" && parent.scope.amount !== undefined) kinds.push("amountFix");
-  if (parent.kind === "opener" && (parent.shape === "missingAmount" || parent.shape === "missingWhat")) kinds.push("answerClarify");
-  if (parent.kind === "opener" && parent.shape === "ambiguousTarget" && candidateFor(parent, data) !== undefined) kinds.push("pickCandidate");
+  if (asksAfresh(parent) && (parent.shape === "missingAmount" || parent.shape === "missingWhat")) kinds.push("answerClarify");
+  if (asksAfresh(parent) && parent.shape === "ambiguousTarget" && candidateFor(parent, data) !== undefined) kinds.push("pickCandidate");
   return kinds;
 }
 
-const FOLLOWUP_EXPECT: Record<Exclude<FollowUpKind, "periodShift" | "categoryShift" | "pickCandidate">, Expect> = {
+const FOLLOWUP_EXPECT: Record<Exclude<BankedFollowUpKind, "periodShift" | "categoryShift" | "pickCandidate">, Expect> = {
   refine: { must: ["findTransactions"], forbid: WRITE_TOOLS },
   amountFix: { must: ["addTransaction", "updateTransaction"], forbid: [] },
   answerClarify: { must: ["addTransaction"], forbid: [] },
@@ -1350,6 +1358,7 @@ function relabel(label: ScopeLabel, replaced: InvalidKind): ScopeLabel {
 function makeFollowUp(gen: Gen, parent: Turn): Turn {
   const { rng, data } = gen;
   const kind = rng.pick(followUpKinds(parent, data));
+  if (kind === "nextQuestion") return { ...makeOpener(gen), kind: "followup:nextQuestion" };
   let scope: Scope = { ...parent.scope };
   let scopeLabel = parent.scopeLabel;
   let intent = parent.intent;
