@@ -1184,12 +1184,6 @@ check("the run summary's pendo block counts ready sessions, mismatches, beacons 
 // --- Pure usage ------------------------------------------------------------------
 
 const BOT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const FORBIDDEN_CALLS = [".route(", "dispatchEvent", "force: true", "fetch(", "request.newContext", "APIRequestContext", "pendo.track", "pendo.identify", "trackAgent", "updateOptions(", "pendo.initialize", "pendo.pageLoad", "pendo.clearSession"];
-const PAGE_SCRIPT_CALLS = ["evaluate(", "evaluateHandle(", "waitForFunction(", "addInitScript("];
-
-function occurrences(source: string, token: string): number {
-  return source.split(token).length - 1;
-}
 
 /** From `start` up to (not including) `end`, or to the end of the file. */
 function between(source: string, start: string, end: string): string {
@@ -1199,12 +1193,46 @@ function between(source: string, start: string, end: string): string {
   return source.slice(from, to < 0 ? source.length : to);
 }
 
-/** Where page scripts are allowed: seeding, the __name polyfill, and the read-only Pendo check. */
-function pageScriptRegion(file: string, source: string): string {
-  if (file === "seed.ts") return source;
-  if (file === "actions.ts") return between(source, "export async function preparePage(", "\n}\n");
-  if (file === "run.ts") return between(source, "async function readPendoState(", "\n}\n");
-  return "";
+type SourceRegion = (source: string) => string;
+const WHOLE_FILE: SourceRegion = (source) => source;
+const PREPARE_PAGE: SourceRegion = (source) => between(source, "export async function preparePage(", "\n}\n");
+const READ_PENDO_STATE: SourceRegion = (source) => between(source, "async function readPendoState(", "\n}\n");
+const ASSISTANT_SECTION: SourceRegion = (source) => between(source, "// --- Assistant", "// --- Reading and leaving");
+
+interface UsageRule {
+  name: string;
+  /** Needs the `g` flag: matches are counted. */
+  pattern: RegExp;
+  /** The only file regions where a match is allowed; none means nowhere. */
+  allowed?: Readonly<Record<string, SourceRegion>>;
+}
+
+const USAGE_RULES: readonly UsageRule[] = [
+  { name: "calls a Pendo write method", pattern: /(?<![\w$])(?:track|identify|initialize|pageLoad|clearSession|updateOptions|trackAgent)\s*(?:\?\.)?\s*\(/g },
+  { name: "calls a method by its string name", pattern: /\[\s*["'`][\w$]+["'`]\s*\]\s*(?:\?\.)?\s*\(/g },
+  { name: "intercepts requests", pattern: /\.\s*(?:route|routeFromHAR|routeWebSocket)\s*\(/g },
+  { name: "dispatches a synthetic event", pattern: /dispatchEvent/g },
+  { name: "forces an action", pattern: /\bforce["']?\s*:(?!\s*false\b)/g },
+  { name: "calls fetch", pattern: /(?<![\w$])fetch\s*\(/g },
+  { name: "uses Playwright's request API", pattern: /\.\s*request\b|\brequest\s*\.\s*newContext|APIRequestContext/g },
+  { name: "opens its own connection", pattern: /\b(?:XMLHttpRequest|sendBeacon|WebSocket|EventSource)\b/g },
+  { name: "names an /api/ path", pattern: /\/api\//g },
+  { name: "exposes a Node function to the page", pattern: /(?<![\w$])(?:exposeFunction|exposeBinding)\s*\(/g },
+  { name: "runs a page script", pattern: /(?<![\w$])(?:\$\$?eval|evaluateAll|evaluateHandle|addScriptTag)\s*(?:\?\.)?\s*\(/g },
+  { name: "runs evaluate( outside its allowed place", pattern: /(?<![\w$])evaluate\s*(?:\?\.)?\s*\(/g, allowed: { "seed.ts": WHOLE_FILE, "run.ts": READ_PENDO_STATE } },
+  { name: "runs waitForFunction( outside its allowed place", pattern: /(?<![\w$])waitForFunction\s*(?:\?\.)?\s*\(/g, allowed: { "run.ts": READ_PENDO_STATE } },
+  { name: "runs addInitScript( outside its allowed place", pattern: /(?<![\w$])addInitScript\s*(?:\?\.)?\s*\(/g, allowed: { "actions.ts": PREPARE_PAGE } },
+  { name: "opens a CDP session outside its allowed place", pattern: /(?<![\w$])newCDPSession\s*(?:\?\.)?\s*\(/g, allowed: { "seed.ts": WHOLE_FILE } },
+  { name: "touches window.pendo outside readPendoState", pattern: /\b(?:window|globalThis|self)\b[^\n;]{0,60}\bpendo\b/g, allowed: { "run.ts": READ_PENDO_STATE } },
+];
+
+const FILL_CALL = /\.\s*fill\s*(?:\?\.)?\s*\(/;
+const MEMBER_CALL = /\.\s*([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
+/** The two page calls readPendoState makes and the agent's three read-only getters. */
+const PENDO_READ_CALLS: ReadonlySet<string> = new Set(["waitForFunction", "evaluate", "isReady", "getVisitorId", "getAccountId"]);
+
+function matchCount(text: string, pattern: RegExp): number {
+  return [...text.matchAll(pattern)].length;
 }
 
 function fileText(files: ReadonlyMap<string, string>, name: string): string {
@@ -1213,63 +1241,134 @@ function fileText(files: ReadonlyMap<string, string>, name: string): string {
   return text;
 }
 
-/** `files` maps a bot/*.ts name to its source; selftest.ts is left out because it holds these tokens as data. */
+/** `files` maps a bot source name to its text; selftest.ts is left out because it holds these patterns as data. */
 function pureUsageViolations(files: ReadonlyMap<string, string>): string[] {
   const violations: string[] = [];
   for (const [file, source] of files) {
-    for (const token of FORBIDDEN_CALLS) if (source.includes(token)) violations.push(`"${file}" contains "${token}"`);
-    const region = pageScriptRegion(file, source);
-    for (const token of PAGE_SCRIPT_CALLS) {
-      if (occurrences(source, token) !== occurrences(region, token)) violations.push(`"${file}" runs "${token}" outside its allowed place`);
+    for (const rule of USAGE_RULES) {
+      const region = rule.allowed?.[file];
+      const allowed = region === undefined ? 0 : matchCount(region(source), rule.pattern);
+      if (matchCount(source, rule.pattern) !== allowed) violations.push(`"${file}" ${rule.name}`);
     }
   }
-  const prompts = fileText(files, "assistant-prompts.ts");
-  if (prompts.includes(".fill(")) violations.push('"assistant-prompts.ts" contains ".fill("');
-  if (prompts.includes('from "playwright"')) violations.push('"assistant-prompts.ts" imports playwright');
-  if (between(fileText(files, "actions.ts"), "// --- Assistant", "// --- Reading and leaving").includes(".fill(")) {
-    violations.push('"actions.ts" assistant section contains ".fill("');
+  for (const [, name] of READ_PENDO_STATE(fileText(files, "run.ts")).matchAll(MEMBER_CALL)) {
+    if (!PENDO_READ_CALLS.has(name)) violations.push(`"run.ts" readPendoState calls ".${name}("`);
   }
+  const prompts = fileText(files, "assistant-prompts.ts");
+  if (FILL_CALL.test(prompts)) violations.push('"assistant-prompts.ts" calls .fill(');
+  if (/from\s*["']playwright/.test(prompts)) violations.push('"assistant-prompts.ts" imports playwright');
+  if (FILL_CALL.test(ASSISTANT_SECTION(fileText(files, "actions.ts")))) violations.push('"actions.ts" assistant section calls .fill(');
   return violations;
 }
 
-check("the pure-usage scanner catches each forbidden call and allows page scripts only in their three places (AC14)", () => {
-  const clean = new Map([
-    ["seed.ts", "await page.evaluate(async () => {});"],
-    ["actions.ts", "export async function preparePage(page: Page): Promise<void> {\n  await page.addInitScript(() => {});\n}\n// --- Assistant ---\nawait input.pressSequentially(text);\n// --- Reading and leaving ---\nawait input.fill(text);\n"],
-    ["run.ts", "async function readPendoState(page: Page): Promise<void> {\n  await page.waitForFunction(() => true);\n  await page.evaluate(() => 1);\n}\n"],
-    ["assistant-prompts.ts", "export const x = 1;"],
-  ]);
-  assert.deepStrictEqual(pureUsageViolations(clean), []);
-  const dirty = (file: string, extra: string): Map<string, string> => new Map([...clean, [file, `${fileText(clean, file)}\n${extra}`]]);
-  const cases: [string, string, string][] = [
-    ["actions.ts", "await page.route('**/api/chat', () => {});", '"actions.ts" contains ".route("'],
-    ["actions.ts", "await button.dispatchEvent('click');", '"actions.ts" contains "dispatchEvent"'],
-    ["actions.ts", "await button.click({ force: true });", '"actions.ts" contains "force: true"'],
-    ["run.ts", "await fetch('/api/chat');", '"run.ts" contains "fetch("'],
-    ["run.ts", "await request.newContext();", '"run.ts" contains "request.newContext"'],
-    ["run.ts", "await page.evaluate(() => pendo.track('x'));", '"run.ts" contains "pendo.track"'],
-    ["actions.ts", "await page.evaluate(() => 1);", '"actions.ts" runs "evaluate(" outside its allowed place'],
-    ["run.ts", "await page.waitForFunction(() => true);", '"run.ts" runs "waitForFunction(" outside its allowed place'],
-    ["assistant-prompts.ts", "input.fill(text);", '"assistant-prompts.ts" contains ".fill("'],
-    ["assistant-prompts.ts", 'import type { Page } from "playwright";', '"assistant-prompts.ts" imports playwright'],
+const CLEAN_FIXTURE: ReadonlyMap<string, string> = new Map([
+  ["seed.ts", 'await page.evaluate(async () => {});\nconst cdp = await page.context().newCDPSession(page);\nrequest.onsuccess = () => {};\n'],
+  [
+    "actions.ts",
+    [
+      "export async function preparePage(page: Page): Promise<void> {\n  await page.addInitScript(() => {});\n}\n",
+      "// keep track of the spend; identify the row\nawait button.click({ force: false });\n",
+      "// --- Assistant ---\nawait input.pressSequentially(text);\n// --- Reading and leaving ---\nawait input.fill(text);\n",
+    ].join(""),
+  ],
+  [
+    "run.ts",
+    [
+      "async function readPendoState(page: Page): Promise<void> {\n",
+      "  await page.waitForFunction(() => (window as PendoWindow).pendo?.isReady?.() === true);\n",
+      "  await page.evaluate(() => {\n    const agent = (window as PendoWindow).pendo;\n    return [agent?.getVisitorId?.(), agent?.getAccountId?.()];\n  });\n}\n",
+      'page.on("request", (request) => {\n  if (isPendoBeacon(request.url())) pendo.beacons += 1;\n});\nlog(outcome.pendo);\n',
+    ].join(""),
+  ],
+  ["assistant-prompts.ts", "export const x = 1;"],
+]);
+
+function withExtra(file: string, extra: string): Map<string, string> {
+  return new Map([...CLEAN_FIXTURE, [file, `${fileText(CLEAN_FIXTURE, file)}\n${extra}\n`]]);
+}
+
+/** Puts `extra` inside readPendoState, where page scripts and the Pendo agent are allowed. */
+function insideReadPendoState(extra: string): Map<string, string> {
+  return new Map([...CLEAN_FIXTURE, ["run.ts", fileText(CLEAN_FIXTURE, "run.ts").replace("  });\n}\n", `  });\n  ${extra}\n}\n`)]]);
+}
+
+function insideAssistantSection(extra: string): Map<string, string> {
+  return new Map([...CLEAN_FIXTURE, ["actions.ts", fileText(CLEAN_FIXTURE, "actions.ts").replace("// --- Reading", `${extra}\n// --- Reading`)]]);
+}
+
+check("the pure-usage scanner allows the clean bootstrap, passive reads and look-alike words", () => {
+  assert.deepStrictEqual(pureUsageViolations(CLEAN_FIXTURE), []);
+  assert.ok(insideReadPendoState("x").get("run.ts")?.includes("  x\n}\n"), "the readPendoState fixture lost its injection point");
+});
+
+check("the pure-usage scanner catches every bypass: aliases, optional chaining, spacing and other APIs (AC14)", () => {
+  const ENDS = "await page.evaluate(() => 1);";
+  const cases: [Map<string, string>, string][] = [
+    [insideReadPendoState('agent.track("x");'), '"run.ts" calls a Pendo write method'],
+    [insideReadPendoState('agent?.identify({ visitor: {} });'), '"run.ts" calls a Pendo write method'],
+    [insideReadPendoState('agent.track("x");'), '"run.ts" readPendoState calls ".track("'],
+    [insideReadPendoState("agent?.getMetadata?.();"), '"run.ts" readPendoState calls ".getMetadata("'],
+    [withExtra("run.ts", 'pendo?.track?.("x");'), '"run.ts" calls a Pendo write method'],
+    [withExtra("run.ts", 'pendo . trackAgent ("x");'), '"run.ts" calls a Pendo write method'],
+    [withExtra("actions.ts", "agent.updateOptions({});"), '"actions.ts" calls a Pendo write method'],
+    [withExtra("actions.ts", "pendo.initialize({});"), '"actions.ts" calls a Pendo write method'],
+    [withExtra("actions.ts", "pendo.pageLoad();"), '"actions.ts" calls a Pendo write method'],
+    [withExtra("actions.ts", "pendo.clearSession();"), '"actions.ts" calls a Pendo write method'],
+    [withExtra("run.ts", 'const { track } = agent;\ntrack("x");'), '"run.ts" calls a Pendo write method'],
+    [withExtra("run.ts", 'agent["track"]("x");'), '"run.ts" calls a method by its string name'],
+    [withExtra("seed.ts", "window.pendo.isReady();"), '"seed.ts" touches window.pendo outside readPendoState'],
+    [withExtra("actions.ts", "await page.request.post(url, {});"), "\"actions.ts\" uses Playwright's request API"],
+    [withExtra("actions.ts", "await page.request.get(url);"), "\"actions.ts\" uses Playwright's request API"],
+    [withExtra("actions.ts", "await page?.request.fetch(url);"), "\"actions.ts\" uses Playwright's request API"],
+    [withExtra("actions.ts", "const api = context.request;"), "\"actions.ts\" uses Playwright's request API"],
+    [withExtra("run.ts", "await request.newContext();"), "\"run.ts\" uses Playwright's request API"],
+    [withExtra("run.ts", "let api: APIRequestContext;"), "\"run.ts\" uses Playwright's request API"],
+    [withExtra("run.ts", "await fetch(url);"), '"run.ts" calls fetch'],
+    [withExtra("run.ts", "await window.fetch (url);"), '"run.ts" calls fetch'],
+    [withExtra("seed.ts", "new XMLHttpRequest();"), '"seed.ts" opens its own connection'],
+    [withExtra("seed.ts", "navigator.sendBeacon(url);"), '"seed.ts" opens its own connection'],
+    [withExtra("actions.ts", 'await page.goto(APP_URL + "/api/chat");'), '"actions.ts" names an /api/ path'],
+    [withExtra("actions.ts", "await page.route(glob, handler);"), '"actions.ts" intercepts requests'],
+    [withExtra("actions.ts", "await context.routeFromHAR(file);"), '"actions.ts" intercepts requests'],
+    [withExtra("actions.ts", "await page.routeWebSocket(url, handler);"), '"actions.ts" intercepts requests'],
+    [withExtra("actions.ts", "await button.dispatchEvent('click');"), '"actions.ts" dispatches a synthetic event'],
+    [withExtra("actions.ts", "await button.click({force:true});"), '"actions.ts" forces an action'],
+    [withExtra("actions.ts", "await button.click({ force : true });"), '"actions.ts" forces an action'],
+    [withExtra("actions.ts", 'await button.click({ "force": 1 });'), '"actions.ts" forces an action'],
+    [withExtra("actions.ts", "await page.exposeFunction(name, fn);"), '"actions.ts" exposes a Node function to the page'],
+    [withExtra("actions.ts", "await page.exposeBinding(name, fn);"), '"actions.ts" exposes a Node function to the page'],
+    [withExtra("actions.ts", "await page.$eval(sel, (el) => el);"), '"actions.ts" runs a page script'],
+    [withExtra("actions.ts", "await page.$$eval(sel, (els) => els);"), '"actions.ts" runs a page script'],
+    [withExtra("actions.ts", "await rows.evaluateAll((els) => els);"), '"actions.ts" runs a page script'],
+    [withExtra("actions.ts", "await page.evaluateHandle(() => 1);"), '"actions.ts" runs a page script'],
+    [withExtra("actions.ts", "await page.addScriptTag({ content });"), '"actions.ts" runs a page script'],
+    [withExtra("actions.ts", ENDS), '"actions.ts" runs evaluate( outside its allowed place'],
+    [withExtra("actions.ts", "await input?.evaluate?.((el) => el);"), '"actions.ts" runs evaluate( outside its allowed place'],
+    [withExtra("run.ts", ENDS), '"run.ts" runs evaluate( outside its allowed place'],
+    [withExtra("run.ts", "await page.waitForFunction(() => true);"), '"run.ts" runs waitForFunction( outside its allowed place'],
+    [insideAssistantSection("await page.addInitScript(() => {});"), '"actions.ts" runs addInitScript( outside its allowed place'],
+    [withExtra("actions.ts", "await page.context().newCDPSession(page);"), '"actions.ts" opens a CDP session outside its allowed place'],
+    [insideAssistantSection("await input.fill(text);"), '"actions.ts" assistant section calls .fill('],
+    [insideAssistantSection("await input?.fill (text);"), '"actions.ts" assistant section calls .fill('],
+    [withExtra("assistant-prompts.ts", "input.fill(text);"), '"assistant-prompts.ts" calls .fill('],
+    [withExtra("assistant-prompts.ts", 'import type { Page } from "playwright";'), '"assistant-prompts.ts" imports playwright'],
   ];
-  for (const [file, extra, wanted] of cases) assert.ok(pureUsageViolations(dirty(file, extra)).includes(wanted), `${wanted} not reported`);
-  const filledAssistant = new Map([...clean, ["actions.ts", fileText(clean, "actions.ts").replace("pressSequentially", "fill")]]);
-  assert.ok(pureUsageViolations(filledAssistant).includes('"actions.ts" assistant section contains ".fill("'));
+  for (const [files, wanted] of cases) {
+    const found = pureUsageViolations(files);
+    assert.ok(found.includes(wanted), `${wanted} not reported; got ${JSON.stringify(found)}`);
+  }
 });
 
 check("the bot itself passes the pure-usage scan (AC14)", () => {
   const files = new Map(
     readdirSync(BOT_DIR)
-      .filter((name) => name.endsWith(".ts") && name !== "selftest.ts")
+      .filter((name) => /\.[cm]?[jt]s$/.test(name) && name !== "selftest.ts")
       .map((name): [string, string] => [name, readFileSync(path.join(BOT_DIR, name), "utf8")]),
   );
   assert.deepStrictEqual(pureUsageViolations(files), []);
-  assert.ok(pageScriptRegion("run.ts", fileText(files, "run.ts")).includes("waitForFunction("), "readPendoState lost its page script, so the region check proves nothing");
-  assert.ok(
-    between(fileText(files, "actions.ts"), "// --- Assistant", "// --- Reading and leaving").includes("pressSequentially("),
-    "the actions.ts assistant section moved, so the .fill( check proves nothing",
-  );
+  assert.ok(READ_PENDO_STATE(fileText(files, "run.ts")).includes("waitForFunction("), "readPendoState lost its page script, so the region checks prove nothing");
+  assert.ok(PREPARE_PAGE(fileText(files, "actions.ts")).includes("addInitScript("), "preparePage moved, so the addInitScript check proves nothing");
+  assert.ok(ASSISTANT_SECTION(fileText(files, "actions.ts")).includes("pressSequentially("), "the actions.ts assistant section moved, so the .fill( check proves nothing");
 });
 
 // --- Summary -----------------------------------------------------------------

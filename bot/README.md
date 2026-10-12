@@ -534,9 +534,19 @@ storage clear, and the `preparePage` polyfill. The assistant composer is typed
 key by key (`pressSequentially` with the turn's delay; a corrected typo is a
 wrong letter, `Backspace`, then the right one) and sent with `Enter` or a
 click on `Send` — never `fill()`. Forbidden everywhere: request interception
-(`page.route`), `dispatchEvent`, `force: true`, `fetch(`, API request
-contexts, and any Pendo call that sends or changes data. `npm run selftest`
-scans `bot/*.ts` for these and fails on a hit.
+(`route`, `routeFromHAR`, `routeWebSocket`), `dispatchEvent`, `force` set to
+anything but `false`, `fetch(`, `page.request` and other API request
+contexts, `XMLHttpRequest`/`sendBeacon`, any `/api/` path, `exposeFunction`/
+`exposeBinding`, `$eval`/`$$eval`/`evaluateAll`/`evaluateHandle`/
+`addScriptTag`, a method called by its string name, and any Pendo call that
+sends or changes data (`track`, `identify`, `initialize`, `pageLoad`,
+`clearSession`, `updateOptions`, `trackAgent`, under any alias). Page scripts
+stay in their places: `evaluate` in `seed.ts` and `readPendoState`,
+`waitForFunction` in `readPendoState`, `addInitScript` in `preparePage`,
+`newCDPSession` in `seed.ts`. Only `readPendoState` touches `window.pendo`, and
+only through `isReady`, `getVisitorId` and `getAccountId`. `npm run selftest`
+scans every bot source file with regexes (spacing and optional chaining
+included) and fails on a hit.
 
 ## When the run exits non-zero
 
