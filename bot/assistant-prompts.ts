@@ -1,7 +1,6 @@
 // Pure: the same inputs always give the same turns, so a run's prompts can be replayed exactly.
 
 import {
-  ASSISTANT_FOLLOWUPS_MAX,
   ASSISTANT_NEW_CHAT_RATE,
   ASSISTANT_PROMPT_MAX_CHARS,
   ASSISTANT_SECOND_THREAD_RATE,
@@ -849,16 +848,18 @@ export interface StyleKnobs {
   charDelayMs: { min: number; max: number };
   sendClick: number;
   followUp: number;
+  /** Follow-up turns allowed after one opener in a thread. */
+  followUpsMax: number;
   invalidScope: number;
   amountDecimals: number;
 }
 
 export const ARCHETYPE_STYLE: Record<Archetype, StyleKnobs> = {
-  power: { registers: { terse: 70, plain: 30, chatty: 0 }, lowercase: 0.5, noEndPunctuation: 0.7, keptTypo: 0.02, correctedTypo: 0, charDelayMs: { min: 60, max: 100 }, sendClick: 0.05, followUp: 0.5, invalidScope: 0.03, amountDecimals: 0.5 },
-  regular: { registers: { terse: 20, plain: 65, chatty: 15 }, lowercase: 0.25, noEndPunctuation: 0.35, keptTypo: 0.05, correctedTypo: 0, charDelayMs: { min: 90, max: 150 }, sendClick: 0.2, followUp: 0.4, invalidScope: 0.06, amountDecimals: 0.2 },
-  casual: { registers: { terse: 5, plain: 35, chatty: 60 }, lowercase: 0.55, noEndPunctuation: 0.5, keptTypo: 0.15, correctedTypo: 0.15, charDelayMs: { min: 130, max: 220 }, sendClick: 0.4, followUp: 0.3, invalidScope: 0.1, amountDecimals: 0.2 },
-  explorer: { registers: { terse: 10, plain: 40, chatty: 50 }, lowercase: 0.4, noEndPunctuation: 0.45, keptTypo: 0.1, correctedTypo: 0.1, charDelayMs: { min: 100, max: 180 }, sendClick: 0.3, followUp: 0.45, invalidScope: 0.15, amountDecimals: 0.2 },
-  churning: { registers: { terse: 10, plain: 50, chatty: 40 }, lowercase: 0.5, noEndPunctuation: 0.5, keptTypo: 0.15, correctedTypo: 0, charDelayMs: { min: 130, max: 220 }, sendClick: 0.4, followUp: 0.1, invalidScope: 0.1, amountDecimals: 0.2 },
+  power: { registers: { terse: 70, plain: 30, chatty: 0 }, lowercase: 0.5, noEndPunctuation: 0.7, keptTypo: 0.02, correctedTypo: 0, charDelayMs: { min: 60, max: 100 }, sendClick: 0.05, followUp: 0.75, followUpsMax: 5, invalidScope: 0.03, amountDecimals: 0.5 },
+  regular: { registers: { terse: 20, plain: 65, chatty: 15 }, lowercase: 0.25, noEndPunctuation: 0.35, keptTypo: 0.05, correctedTypo: 0, charDelayMs: { min: 90, max: 150 }, sendClick: 0.2, followUp: 0.65, followUpsMax: 4, invalidScope: 0.06, amountDecimals: 0.2 },
+  casual: { registers: { terse: 5, plain: 35, chatty: 60 }, lowercase: 0.55, noEndPunctuation: 0.5, keptTypo: 0.15, correctedTypo: 0.15, charDelayMs: { min: 130, max: 220 }, sendClick: 0.4, followUp: 0.35, followUpsMax: 2, invalidScope: 0.1, amountDecimals: 0.2 },
+  explorer: { registers: { terse: 10, plain: 40, chatty: 50 }, lowercase: 0.4, noEndPunctuation: 0.45, keptTypo: 0.1, correctedTypo: 0.1, charDelayMs: { min: 100, max: 180 }, sendClick: 0.3, followUp: 0.2, followUpsMax: 1, invalidScope: 0.15, amountDecimals: 0.2 },
+  churning: { registers: { terse: 10, plain: 50, chatty: 40 }, lowercase: 0.5, noEndPunctuation: 0.5, keptTypo: 0.15, correctedTypo: 0, charDelayMs: { min: 130, max: 220 }, sendClick: 0.4, followUp: 0.1, followUpsMax: 1, invalidScope: 0.1, amountDecimals: 0.2 },
 };
 
 export interface StyleProfile {
@@ -1460,7 +1461,7 @@ export function createAssistantPlanner(input: PlannerInput): AssistantPlanner {
         used += 1;
         actionTurns += 1;
         while (
-          turns.length <= ASSISTANT_FOLLOWUPS_MAX &&
+          turns.length <= gen.knobs.followUpsMax &&
           room() &&
           turns[turns.length - 1].kind !== "followup:thanks" &&
           gen.rng.chance(gen.knobs.followUp)

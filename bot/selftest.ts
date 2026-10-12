@@ -16,9 +16,9 @@ import {
   makeRng,
   NEW_VISITOR_ARCHETYPE,
   ASSISTANT_FOCUS_SHARE,
-  ASSISTANT_FOLLOWUPS_MAX,
   ASSISTANT_PROMPT_MAX_CHARS,
   ASSISTANT_TURNS_PER_ACTION_MAX,
+  ASSISTANT_TURNS_PER_RUN_MAX,
   ASSISTANT_TURNS_PER_SESSION_MAX,
   type Region,
   type Rng,
@@ -869,7 +869,7 @@ check("focusCell walks the 28 cells in order, one per UTC day", () => {
   assert.deepStrictEqual(focusCell(new Date("2026-09-04T00:00:00.000Z")), focusCell(new Date("2026-09-04T23:59:59.999Z")));
 });
 
-check("same session seed, persona and date give the same six turns; 100 seeds give 90+ distinct first turns (AC3)", () => {
+check("same session seed, persona and date give the same full session of turns; 100 seeds give 90+ distinct first turns (AC3)", () => {
   const persona = PERSONAS[0];
   const first = sessionTurns(plannerFor(persona, "session:2026-09-04T10:00:00.000Z:1"));
   const second = sessionTurns(plannerFor(persona, "session:2026-09-04T10:00:00.000Z:1"));
@@ -1134,7 +1134,7 @@ check("generated text never doubles a template word or puts a preposition before
   assert.strictEqual(templateDoubledWord([{ text: "work reimbursement", slot: true }, { text: " ", slot: false }, { text: "Reimbursement", slot: true }]), null);
 });
 
-check("planner caps hold over 10,000 sessions and generated text is safe to type and log (AC11, AC12, RF1)", () => {
+check("planner caps hold over 10,000 sessions and generated text is safe to type and log (AD6, AC12, RF1)", () => {
   const banned = [/@/, /sk-/i, /http/i, /www\./i, /\d{12,}/, /["\n\r{}[\]]/];
   const identities = PERSONAS.flatMap((p) => [...p.displayName.split(" "), p.username]).map((word) => word.toLowerCase());
   let turnsChecked = 0;
@@ -1142,12 +1142,15 @@ check("planner caps hold over 10,000 sessions and generated text is safe to type
     const persona = PERSONAS[s % PERSONAS.length];
     const planner = plannerFor(persona, `caps:${s}`);
     let session = 0;
-    for (let a = 0; a < 8; a++) {
+    // Every action while turns are left sends at least one, so this many always spends the session cap.
+    for (let a = 0; a < ASSISTANT_TURNS_PER_SESSION_MAX + 2; a++) {
       const plan = planner.nextAction();
       const actionTurns = plan.threads.reduce((sum, thread) => sum + thread.turns.length, 0);
       assert.ok(actionTurns <= ASSISTANT_TURNS_PER_ACTION_MAX, `action with ${actionTurns} turns`);
       for (const thread of plan.threads) {
-        assert.ok(thread.turns.length - 1 <= ASSISTANT_FOLLOWUPS_MAX, `thread with ${thread.turns.length - 1} follow-ups`);
+        assert.ok(thread.turns.length >= 1, "an empty thread");
+        const max = ARCHETYPE_STYLE[persona.archetype].followUpsMax;
+        assert.ok(thread.turns.length - 1 <= max, `${persona.archetype} thread with ${thread.turns.length - 1} follow-ups, max ${max}`);
         assert.strictEqual(thread.turns[0].kind, "opener");
         if (turnsChecked >= 10000) continue;
         for (const turn of thread.turns) {
@@ -1162,6 +1165,7 @@ check("planner caps hold over 10,000 sessions and generated text is safe to type
       session += actionTurns;
     }
     assert.ok(session <= ASSISTANT_TURNS_PER_SESSION_MAX, `session with ${session} turns`);
+    assert.strictEqual(planner.turnsLeft(), ASSISTANT_TURNS_PER_SESSION_MAX - session);
   }
   assert.strictEqual(turnsChecked, 10000);
 });
@@ -1515,6 +1519,26 @@ check("each archetype clicks Send at its sendClick rate within 3 points over 3,0
     const target = ARCHETYPE_STYLE[archetype].sendClick;
     assert.ok(Math.abs(share - target) <= 0.03, `${archetype} clicks Send on ${(share * 100).toFixed(1)}% vs ${target * 100}%`);
   }
+});
+
+check("follow-up chance and per-thread cap match the D3 table; caps are 6 per action, 10 per session, 60 per run (AD4)", () => {
+  const table: Record<Archetype, { followUp: number; followUpsMax: number }> = {
+    power: { followUp: 0.75, followUpsMax: 5 },
+    regular: { followUp: 0.65, followUpsMax: 4 },
+    casual: { followUp: 0.35, followUpsMax: 2 },
+    explorer: { followUp: 0.2, followUpsMax: 1 },
+    churning: { followUp: 0.1, followUpsMax: 1 },
+  };
+  for (const archetype of ARCHETYPE_LIST) {
+    const { followUp, followUpsMax } = ARCHETYPE_STYLE[archetype];
+    assert.deepStrictEqual({ followUp, followUpsMax }, table[archetype], archetype);
+  }
+  assert.deepStrictEqual([ASSISTANT_TURNS_PER_ACTION_MAX, ASSISTANT_TURNS_PER_SESSION_MAX, ASSISTANT_TURNS_PER_RUN_MAX], [6, 10, 60]);
+  const removed = ["ASSISTANT", "FOLLOWUPS", "MAX"].join("_");
+  const stale = readdirSync(BOT_DIR).filter(
+    (name) => /\.(?:ts|md)$/.test(name) && name !== "selftest.ts" && readFileSync(path.join(BOT_DIR, name), "utf8").includes(removed),
+  );
+  assert.deepStrictEqual(stale, [], `${removed} is still named`);
 });
 
 // --- Summary -----------------------------------------------------------------

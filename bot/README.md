@@ -107,10 +107,9 @@ what they affect.
 | `UI_RESET_MAX_ESCAPES` (5) | How many Escape presses the recovery code spends trying to close whatever a failed action left open. | 3–8. |
 | `FILTER_COUNT_MIN` / `FILTER_COUNT_MAX` (1–2) | How many of the four transaction filters one `filterTransactions` action touches at once. | 1–4 (4 is every filter at once). |
 | `FILTER_MONTH_LOOKBACK_MAX` (5) | The month filter picks a month up to this many months back. | 1–12. |
-| `ASSISTANT_TURNS_PER_ACTION_MAX` (4) | Turns (openers + follow-ups) one `askAssistant` action may send. | 2–6. |
-| `ASSISTANT_TURNS_PER_SESSION_MAX` (6) | Assistant turns one session may send; at the cap `askAssistant` drops out of the walk. | 2–10. |
+| `ASSISTANT_TURNS_PER_ACTION_MAX` (6) | Turns (openers + follow-ups) one `askAssistant` action may send. | 2–8. |
+| `ASSISTANT_TURNS_PER_SESSION_MAX` (10) | Assistant turns one session may send; at the cap `askAssistant` drops out of the walk. | 4–12. |
 | `ASSISTANT_TURNS_PER_RUN_MAX` (60) | Assistant turns the whole run may send (in-memory counter, one run only). Bounds model spend per run. | 20–120. |
-| `ASSISTANT_FOLLOWUPS_MAX` (2) | Follow-up turns after one opener in a thread. | 0–3. |
 | `ASSISTANT_PROMPT_MAX_CHARS` (200) | Longest prompt the generator may produce; the selftest proves no template exceeds it. | 100–2000 (the app's own limit is 2000). |
 | `ASSISTANT_MAX_CARDS_PER_PROMPT` (3) | Confirm cards one prompt may resolve before the action fails as a runaway. | 2–5. |
 
@@ -483,8 +482,17 @@ One `askAssistant` runs one thread, or two at `ASSISTANT_SECOND_THREAD_RATE`.
 Before a thread, when the log already holds messages, it clicks `New chat` at
 `ASSISTANT_NEW_CHAT_RATE`. After each turn a follow-up (`periodShift`,
 `categoryShift`, `refine`, `amountFix`, `answerClarify`, `pickCandidate`,
-`thanks`) comes at the archetype's chance, at most `ASSISTANT_FOLLOWUPS_MAX`
-per thread. A `clarify/ambiguousTarget` opener either deletes ("delete my
+`thanks`) comes at the archetype's `followUp` chance, at most its
+`followUpsMax` per thread (`ARCHETYPE_STYLE` in `assistant-prompts.ts`):
+
+| | power | regular | casual | explorer | churning |
+|---|---|---|---|---|---|
+| `followUp` (chance after each turn) | 0.75 | 0.65 | 0.35 | 0.20 | 0.10 |
+| `followUpsMax` (per thread) | 5 | 4 | 2 | 1 | 1 |
+
+New visitors use the `explorer` row. `thanks` ends a thread.
+
+A `clarify/ambiguousTarget` opener either deletes ("delete my
 coffee") or names the new amount ("change my coffee to 4.50"), so its
 `pickCandidate` follow-up ("the one on Oct 3") completes the write: it must
 call `deleteTransaction` or `updateTransaction` respectively.
