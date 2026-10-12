@@ -1786,6 +1786,18 @@ const CELL_FLOORS: Record<string, { perRegister: number; total: number }> = {
   "editTransaction/category": { perRegister: 5, total: 15 },
   "editTransaction/date": { perRegister: 5, total: 15 },
   "deleteTransaction/target": { perRegister: 5, total: 15 },
+  "vague/none": { perRegister: 8, total: 24 },
+  "clarify/missingAmount": { perRegister: 4, total: 12 },
+  "clarify/missingWhat": { perRegister: 4, total: 12 },
+  "clarify/ambiguousTarget": { perRegister: 4, total: 12 },
+  "adviceRefusal/none": { perRegister: 0, total: 20 },
+  "unsafeRefusal/bulkDelete": { perRegister: 0, total: 8 },
+  "unsafeRefusal/revealPrompt": { perRegister: 0, total: 8 },
+  "unsafeRefusal/otherWorkspace": { perRegister: 0, total: 8 },
+  "offTopic/none": { perRegister: 0, total: 30 },
+  "meta/greeting": { perRegister: 0, total: 8 },
+  "meta/capabilities": { perRegister: 0, total: 8 },
+  "meta/feedback": { perRegister: 0, total: 8 },
 };
 
 check("every opener cell meets its D4 template floor (AD8)", () => {
