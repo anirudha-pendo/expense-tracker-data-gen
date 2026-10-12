@@ -407,9 +407,14 @@ events, not identity: no visitor or account field moves.
 | A proposed write is confirmed, cancelled or fails (`confirm` / `cancel`) | `track("assistant_write_resolved")` with `tool`, `outcome` and, when there is one, `reason` |
 | A chat request errors (`onError`) | `track("assistant_error")` with the error `code` |
 
-The bot's `askAssistant` reaches the first two on a deployment that serves
-`/api/chat`; write confirmation or cancellation is reached only if the bot
-clicks a confirm card.
+The bot's `askAssistant` reaches all four on a deployment that serves
+`/api/chat`. Every sent turn is a `prompt` and every finished reply an
+`agent_response`. When a reply proposes a write, the bot clicks `Confirm`
+(`ASSISTANT_CONFIRM_RATE`, 0.75) or `Cancel`, so `assistant_write_resolved`
+carries both `confirmed` and `cancelled`. A failed request (the alert the bot
+logs as `skipped:askAssistant (assistant unavailable: …)`) is an
+`assistant_error`. `New chat` sends no event of its own: it starts a new chat,
+so the next `prompt` carries a new `conversationId`.
 
 ### Which of those the bot's walk actually reaches
 
