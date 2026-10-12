@@ -21,6 +21,7 @@ import {
   ASSISTANT_TURNS_PER_ACTION_MAX,
   ASSISTANT_TURNS_PER_SESSION_MAX,
   type Region,
+  type Rng,
 } from "./config";
 import {
   ARCHETYPES,
@@ -70,6 +71,7 @@ import {
   type Expect,
   type Intent,
   type Period,
+  type PlannerInput,
   type PromptData,
   type Register,
   type Scope,
@@ -787,9 +789,9 @@ check("styled text replays exactly from its keystrokes, and a typo never touches
   assert.ok(corrected > 100 && kept > 100, `typo paths not exercised: corrected ${corrected}, kept ${kept}`);
 });
 
-function plannerFor(persona: Persona, sessionSeed: string, options: { now?: Date; focusShare?: number } = {}): AssistantPlanner {
+function plannerInput(persona: Persona, sessionSeed: string, options: { now?: Date; focusShare?: number } = {}): PlannerInput {
   const now = options.now ?? TEST_NOW;
-  return createAssistantPlanner({
+  return {
     sessionSeed,
     styleKey: persona.id,
     archetype: persona.archetype,
@@ -797,7 +799,11 @@ function plannerFor(persona: Persona, sessionSeed: string, options: { now?: Date
     data: assistantData(persona, now),
     planNow: now,
     focusShare: options.focusShare ?? ASSISTANT_FOCUS_SHARE,
-  });
+  };
+}
+
+function plannerFor(persona: Persona, sessionSeed: string, options: { now?: Date; focusShare?: number } = {}): AssistantPlanner {
+  return createAssistantPlanner(plannerInput(persona, sessionSeed, options));
 }
 
 function firstOpener(planner: AssistantPlanner): Turn {
@@ -842,13 +848,26 @@ check("same session seed, persona and date give the same six turns; 100 seeds gi
   assert.ok(texts.size >= 90, `only ${texts.size} distinct first turns`);
 });
 
-check("turn text never depends on the session's action RNG (AC4)", () => {
+/** Input fields an Rng could be passed through; must stay empty so the session's action RNG cannot reach the planner. */
+type PlannerRngFields = { [K in keyof PlannerInput]-?: Rng extends NonNullable<PlannerInput[K]> ? K : never }[keyof PlannerInput];
+const PLANNER_TAKES_NO_RNG: [PlannerRngFields] extends [never] ? true : false = true;
+
+check("turn text never depends on the session's action RNG, even when handed it advanced and drawn from between actions (AC4)", () => {
+  assert.ok(PLANNER_TAKES_NO_RNG);
   const persona = PERSONAS[3];
   const seed = "session:2026-09-04T10:00:00.000Z:7";
   const untouched = sessionTurns(plannerFor(persona, seed));
+  // run.ts seeds ctx.rng from the same session seed string.
   const actionRng = makeRng(seed);
   for (let i = 0; i < 1000; i++) actionRng.next();
-  assert.deepStrictEqual(sessionTurns(plannerFor(persona, seed)), untouched);
+  const handedRng = { ...plannerInput(persona, seed), rng: actionRng };
+  const planner = createAssistantPlanner(handedRng);
+  const turns: Turn[] = [];
+  while (planner.turnsLeft() > 0) {
+    for (let i = actionRng.int(1, 50); i > 0; i--) actionRng.next();
+    for (const thread of planner.nextAction().threads) turns.push(...thread.turns);
+  }
+  assert.deepStrictEqual(turns, untouched);
 });
 
 check("opener intent shares match the archetype mix within 3 points with focus off (AC5)", () => {
