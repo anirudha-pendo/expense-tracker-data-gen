@@ -1767,6 +1767,25 @@ check("every template reads right with every value its slots can take: no double
   assert.ok(rendered > 5000, `only ${rendered} renders`);
 });
 
+/** D4 floors per opener cell: templates per register (0 for an `any` cell) and in total. Alternation does not count. */
+const CELL_FLOORS: Record<string, { perRegister: number; total: number }> = {
+  "spendSummary/all": { perRegister: 5, total: 15 },
+  "spendSummary/category": { perRegister: 5, total: 15 },
+  "incomeSummary/all": { perRegister: 5, total: 15 },
+  "incomeSummary/category": { perRegister: 5, total: 15 },
+};
+
+check("every opener cell meets its D4 template floor (AD8)", () => {
+  for (const [key, floor] of Object.entries(CELL_FLOORS)) {
+    const templates = OPENER_TEMPLATES.filter((t) => `${t.intent}/${t.shape}` === key);
+    assert.ok(templates.length >= floor.total, `${key} has ${templates.length} templates, needs ${floor.total}`);
+    for (const register of STYLE_REGISTERS) {
+      const n = templates.filter((t) => t.register === register).length;
+      assert.ok(n >= floor.perRegister, `${key} has ${n} ${register} templates, needs ${floor.perRegister}`);
+    }
+  }
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
