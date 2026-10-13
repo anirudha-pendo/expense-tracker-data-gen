@@ -6,12 +6,15 @@ import { SignInForm } from "../components/sign-in-form";
 import type { SignInFormValues } from "../schemas/auth.schema";
 
 export function SignInPage() {
-  const { signIn, hasWorkspace } = useAuthContext();
+  const { signIn } = useAuthContext();
   const navigate = useNavigate();
 
   async function handleSignIn(values: SignInFormValues) {
     try {
-      await signIn(values.email, values.password);
+      // Use the workspace signIn resolved, not `hasWorkspace` from context:
+      // that value is captured before sign-in finishes and is always stale here.
+      const activeWorkspace = await signIn(values.email, values.password);
+      const hasWorkspace = activeWorkspace !== null;
       pendo?.track("sign_in_completed", {
         hasWorkspace,
       });
