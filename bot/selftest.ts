@@ -1842,6 +1842,20 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- App data-change signals -------------------------------------------------
+
+check("data-export-import calls emitDataChanged so the UI refreshes after a JSON import", () => {
+  const source = readFileSync(path.resolve(BOT_DIR, "../src/features/settings/components/data-export-import.tsx"), "utf8");
+  assert.ok(
+    /from\s+["']@\/shared\/lib\/data-events["']/.test(source),
+    "data-export-import.tsx must import from @/shared/lib/data-events",
+  );
+  assert.ok(
+    /emitDataChanged\s*\(/.test(source),
+    "data-export-import.tsx must call emitDataChanged() after writing data",
+  );
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);

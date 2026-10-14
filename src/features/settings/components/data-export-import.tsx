@@ -7,6 +7,7 @@ import { getTransactionsByWorkspaceId, createTransaction } from "@/lib/db/reposi
 import { getCategoriesByWorkspaceId } from "@/lib/db/repositories/categories.repo";
 import { getGoalsByWorkspaceId, createGoal } from "@/lib/db/repositories/goals.repo";
 import { getBudgetsByWorkspaceId, upsertBudget } from "@/lib/db/repositories/budgets.repo";
+import { emitDataChanged } from "@/shared/lib/data-events";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
 import type { Budget, Goal, Transaction } from "@/types";
 
@@ -147,6 +148,7 @@ export function DataExportImport() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed — check the file format");
     } finally {
+      emitDataChanged();
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
