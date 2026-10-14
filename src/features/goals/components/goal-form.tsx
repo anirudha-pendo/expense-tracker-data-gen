@@ -1,6 +1,5 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { format } from "date-fns";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,9 +32,7 @@ export function GoalFormDialog({ open, defaultValues, onSubmit, onCancel }: Goal
     defaultValues: {
       name: defaultValues?.name ?? "",
       targetAmount: defaultValues?.targetAmount,
-      deadline: defaultValues?.deadline
-        ? format(new Date(defaultValues.deadline), "yyyy-MM-dd")
-        : "",
+      deadline: defaultValues?.deadline ?? "",
       color: defaultValues?.color ?? PRESET_COLORS[5],
     },
   });
