@@ -5,11 +5,12 @@ const DB_NAME = "expense-tracker";
 const DB_VERSION = 3;
 
 let dbInstance: IDBPDatabase<ExpenseTrackerDBSchema> | null = null;
+let dbPromise: Promise<IDBPDatabase<ExpenseTrackerDBSchema>> | null = null;
 
-export async function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
-  if (dbInstance) return dbInstance;
+export function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
+  if (dbPromise) return dbPromise;
 
-  dbInstance = await openDB<ExpenseTrackerDBSchema>(DB_NAME, DB_VERSION, {
+  dbPromise = openDB<ExpenseTrackerDBSchema>(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, transaction) {
       if (oldVersion < 1) {
         const userStore = db.createObjectStore("users", { keyPath: "id" });
@@ -54,8 +55,19 @@ export async function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
     blocking() {
       dbInstance?.close();
       dbInstance = null;
+      dbPromise = null;
     },
-  });
+  }).then(
+    (db) => {
+      dbInstance = db;
+      return db;
+    },
+    (err) => {
+      // Don't cache a failed open — let the next caller retry.
+      dbPromise = null;
+      throw err;
+    },
+  );
 
-  return dbInstance;
+  return dbPromise;
 }

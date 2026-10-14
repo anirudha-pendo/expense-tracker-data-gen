@@ -1842,6 +1842,24 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- App source invariants ---------------------------------------------------
+
+check("getDB caches the pending promise to prevent concurrent connection leaks (APP-172985)", () => {
+  const clientSource = readFileSync(path.join(BOT_DIR, "../src/lib/db/client.ts"), "utf8");
+  // The module must cache the promise returned by openDB, not just the
+  // resolved IDBPDatabase instance.  Caching only the instance leaves a
+  // window where concurrent callers each call openDB before the first
+  // resolves, leaking connections that block cross-tab upgrades.
+  assert.ok(
+    /\bdbPromise\b/.test(clientSource),
+    "client.ts must cache the promise (dbPromise), not just the resolved instance",
+  );
+  assert.ok(
+    !/if\s*\(\s*dbInstance\s*\)\s*return\s+dbInstance/.test(clientSource),
+    "client.ts must not use the broken 'if (dbInstance) return dbInstance' pattern — it races on concurrent calls",
+  );
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
