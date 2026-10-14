@@ -77,13 +77,14 @@ export function useDashboardStats(workspaceId: string): DashboardStats {
       categorySpendMap.set(t.categoryId, (categorySpendMap.get(t.categoryId) ?? 0) + t.amount);
     });
 
-  const categoryBreakdown: CategorySpend[] = Array.from(categorySpendMap.entries())
+  const sortedCategorySpends: CategorySpend[] = Array.from(categorySpendMap.entries())
     .map(([id, amount]) => {
       const cat = categoryMap.get(id);
       return { name: cat?.name ?? "Unknown", amount, color: cat?.color ?? "#6b7280" };
     })
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 6);
+    .sort((a, b) => b.amount - a.amount);
+
+  const categoryBreakdown: CategorySpend[] = capCategoryBreakdown(sortedCategorySpends);
 
   const monthlyTrend: MonthlyTrend[] = Array.from({ length: 6 }, (_, i) => {
     const date = subMonths(now, 5 - i);
@@ -111,4 +112,17 @@ export function useDashboardStats(workspaceId: string): DashboardStats {
     recentTransactions,
     isLoading,
   };
+}
+
+/** Show the top 6 categories; fold the rest into an "Other" bucket so the chart total stays accurate. */
+export function capCategoryBreakdown(sorted: CategorySpend[]): CategorySpend[] {
+  if (sorted.length <= 6) return sorted;
+  return [
+    ...sorted.slice(0, 6),
+    {
+      name: "Other",
+      amount: sorted.slice(6).reduce((sum, c) => sum + c.amount, 0),
+      color: "#9ca3af",
+    },
+  ];
 }
