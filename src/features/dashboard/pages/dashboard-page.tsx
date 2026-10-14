@@ -29,6 +29,7 @@ export function DashboardPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <SpendingByCategoryChart
             data={stats.categoryBreakdown}
+            totalExpenses={stats.summary.totalExpenses}
             currency={currency}
             locale={locale}
             isLoading={stats.isLoading}
