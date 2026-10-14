@@ -36,6 +36,7 @@ import {
 import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
 import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
+import { escapeCsvField } from "../src/lib/format";
 import {
   ARCHETYPE_STYLE,
   BANKED_FOLLOWUP_KINDS,
@@ -1840,6 +1841,21 @@ check("one power and one casual persona see many wordings of one question, none 
       assert.ok(Math.max(...counts.values()) <= 75, `${label}: one template took ${Math.max(...counts.values())} of 300`);
     }
   }
+});
+
+// --- CSV field escaping (APP-172983) ------------------------------------------
+
+check("escapeCsvField quotes and escapes per RFC 4180", () => {
+  // A comma inside a field was the original bug: it split the column.
+  assert.strictEqual(escapeCsvField("Bills, Fees"), '"Bills, Fees"');
+  // Embedded double quotes must be doubled.
+  assert.strictEqual(escapeCsvField('She said "hi"'), '"She said ""hi"""');
+  // Plain value still gets wrapped.
+  assert.strictEqual(escapeCsvField("Groceries"), '"Groceries"');
+  // Empty string is a quoted empty field.
+  assert.strictEqual(escapeCsvField(""), '""');
+  // Comma + quote combined.
+  assert.strictEqual(escapeCsvField('A "quoted, value"'), '"A ""quoted, value"""');
 });
 
 // --- Summary -----------------------------------------------------------------
