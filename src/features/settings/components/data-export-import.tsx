@@ -58,7 +58,7 @@ export function DataExportImport() {
         t.id,
         t.type,
         t.amount.toFixed(2),
-        catMap.get(t.categoryId) ?? "",
+        `"${(catMap.get(t.categoryId) ?? "").replace(/"/g, '""')}"`,
         `"${t.description.replace(/"/g, '""')}"`,
         t.date,
         t.isRecurring ? "Yes" : "No",
