@@ -1842,6 +1842,33 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- getDB promise cache (APP-172985) ----------------------------------------
+
+check("getDB caches the pending promise, not just the resolved connection (APP-172985)", () => {
+  const clientSource = readFileSync(path.join(BOT_DIR, "..", "src", "lib", "db", "client.ts"), "utf8");
+  // The fix caches the promise so concurrent callers share one openDB() call.
+  // A revert to caching the resolved instance re-opens the connection leak.
+  assert.ok(
+    /let\s+dbPromise\b.*Promise/.test(clientSource),
+    "getDB must cache the promise (dbPromise), not the resolved instance",
+  );
+  assert.ok(
+    !/let\s+dbInstance\b/.test(clientSource),
+    "getDB must not use a dbInstance variable — cache the promise to prevent concurrent opens",
+  );
+  // The promise must be assigned synchronously (no await before openDB),
+  // so every concurrent caller receives the same promise.
+  assert.ok(
+    /dbPromise\s*=\s*openDB/.test(clientSource),
+    "dbPromise must be assigned the openDB() call directly (not awaited), so concurrent callers share it",
+  );
+  // blocking() must reset dbPromise so the next getDB() opens a fresh connection.
+  assert.ok(
+    /blocking\s*\(\)\s*\{[^}]*dbPromise\s*=\s*null/.test(clientSource),
+    "blocking() must reset dbPromise to null so a fresh connection is opened after a cross-tab upgrade",
+  );
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
