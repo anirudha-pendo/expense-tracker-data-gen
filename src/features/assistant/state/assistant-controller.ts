@@ -76,7 +76,7 @@ export class AssistantController {
 
   private update(patch: Partial<ControllerSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
-    for (const listener of this.listeners) listener();
+    for (const listener of [...this.listeners]) listener();
   }
 
   private freshConversation(): Conversation {
@@ -111,7 +111,7 @@ export class AssistantController {
     this.claimed.clear();
     this.superseding = false;
     this.snapshot = this.freshSnapshot(key);
-    for (const listener of this.listeners) listener();
+    for (const listener of [...this.listeners]) listener();
     previous.stop().catch((error: unknown) => console.error("assistant: could not stop the previous chat", error));
   }
 

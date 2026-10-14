@@ -1842,6 +1842,36 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- Listener snapshot (APP-173109) ------------------------------------------
+
+check("spreading a listener Set before iterating prevents mutation-during-enumeration (APP-173109)", () => {
+  // Models the AssistantController pattern: a Set of listeners is iterated to
+  // notify subscribers, and a listener can unsubscribe another listener (e.g.
+  // React cleanup running synchronously when useSyncExternalStore re-renders).
+  const listeners = new Set<() => void>();
+  const called: string[] = [];
+
+  const listenerA = () => { called.push("a"); };
+  const listenerB = () => {
+    called.push("b");
+    // Simulates a React cleanup removing listenerC mid-iteration.
+    listeners.delete(listenerC);
+  };
+  const listenerC = () => { called.push("c"); };
+
+  listeners.add(listenerA);
+  listeners.add(listenerB);
+  listeners.add(listenerC);
+
+  // Snapshot iteration: all three are called despite the deletion in listenerB.
+  for (const listener of [...listeners]) listener();
+  assert.deepStrictEqual(called, ["a", "b", "c"]);
+
+  // The deletion itself still took effect on the Set.
+  assert.strictEqual(listeners.size, 2);
+  assert.ok(!listeners.has(listenerC));
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
