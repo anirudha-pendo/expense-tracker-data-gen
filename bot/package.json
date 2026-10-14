@@ -5,6 +5,7 @@
   "scripts": {
     "run": "tsx run.ts",
     "selftest": "tsx selftest.ts",
+    "test:cascade": "tsx test-cascade-delete.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -12,6 +13,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
+    "fake-indexeddb": "^6.2.5",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }
