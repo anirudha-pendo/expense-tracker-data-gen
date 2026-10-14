@@ -36,6 +36,7 @@ import {
 import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
 import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
+import { parseCalendarDate, ISO_DATE_PATTERN } from "../src/lib/dates";
 import {
   ARCHETYPE_STYLE,
   BANKED_FOLLOWUP_KINDS,
@@ -1839,6 +1840,25 @@ check("one power and one casual persona see many wordings of one question, none 
       assert.ok(counts.size >= 8, `${label} used only ${counts.size} templates`);
       assert.ok(Math.max(...counts.values()) <= 75, `${label}: one template took ${Math.max(...counts.values())} of 300`);
     }
+  }
+});
+
+// --- Calendar date parsing (APP-172980) --------------------------------------
+
+check("parseCalendarDate gives local midnight, not UTC midnight, for a bare YYYY-MM-DD string", () => {
+  // Regression: form defaults must never pass a YYYY-MM-DD string through
+  // new Date(), which creates UTC midnight and in UTC-negative timezones
+  // formats as the previous calendar day.
+  const cases = ["2026-03-01", "2026-01-01", "2025-12-31", "2026-06-15"];
+  for (const iso of cases) {
+    assert.ok(ISO_DATE_PATTERN.test(iso), `${iso} must match ISO_DATE_PATTERN`);
+    const local = parseCalendarDate(iso);
+    const [year, month, day] = iso.split("-").map(Number);
+    assert.strictEqual(local.getFullYear(), year, `${iso} year`);
+    assert.strictEqual(local.getMonth(), month - 1, `${iso} month`);
+    assert.strictEqual(local.getDate(), day, `${iso} day`);
+    assert.strictEqual(local.getHours(), 0, `${iso} hours`);
+    assert.strictEqual(local.getMinutes(), 0, `${iso} minutes`);
   }
 });
 
