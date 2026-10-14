@@ -1842,6 +1842,28 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- DB client guard ----------------------------------------------------------
+
+check("getDB caches the pending promise, not the resolved instance (APP-172985)", () => {
+  const clientSource = readFileSync(path.join(BOT_DIR, "..", "src", "lib", "db", "client.ts"), "utf8");
+  // The fix: cache the promise so concurrent callers share one connection.
+  assert.ok(
+    /\bdbPromise\b/.test(clientSource),
+    "client.ts must cache a dbPromise, not a dbInstance",
+  );
+  // The bug: `dbInstance = await openDB(...)` lets concurrent callers each
+  // open their own connection before the first await resolves.
+  assert.ok(
+    !/\bdbInstance\s*=\s*await\s+openDB\b/.test(clientSource),
+    "client.ts must not assign the resolved instance — cache the promise instead",
+  );
+  // blocking() must reset the cached promise so the next getDB() opens fresh.
+  assert.ok(
+    clientSource.includes("dbPromise = null"),
+    "blocking() must reset dbPromise to null",
+  );
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
