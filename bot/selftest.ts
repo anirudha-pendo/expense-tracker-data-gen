@@ -1842,6 +1842,36 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- DB client (regression: APP-172985) ----------------------------------------
+
+const DB_CLIENT_PATH = path.resolve(BOT_DIR, "../src/lib/db/client.ts");
+const dbClientSource = readFileSync(DB_CLIENT_PATH, "utf8");
+
+check("getDB caches the promise, not the resolved instance (APP-172985)", () => {
+  // The function must NOT be async — an async wrapper creates a new promise on
+  // every call, defeating the cache even when the variable is right.
+  assert.ok(
+    /export\s+function\s+getDB\b/.test(dbClientSource),
+    "getDB must be a plain (non-async) exported function",
+  );
+  assert.ok(
+    !/export\s+async\s+function\s+getDB\b/.test(dbClientSource),
+    "getDB must not be async — async wraps every return in a fresh promise",
+  );
+
+  // The module-level cache must hold a Promise, not an IDBPDatabase instance.
+  assert.ok(
+    /let\s+\w+:\s*Promise</.test(dbClientSource),
+    "the module-level cache variable must be typed as a Promise",
+  );
+
+  // blocking() must null the cached promise so the next getDB() reopens.
+  assert.ok(
+    /blocking\s*\(\)\s*\{[^}]*=\s*null/s.test(dbClientSource),
+    "blocking() must reset the cached promise to null",
+  );
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);

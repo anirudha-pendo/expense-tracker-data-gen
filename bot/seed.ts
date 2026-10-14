@@ -212,19 +212,12 @@ export async function seedPersona(page: Page, persona: Persona, seed: SeedData):
 export async function clearBrowserState(page: Page): Promise<void> {
   await page.goto(APP_URL);
 
-  // Not `indexedDB.deleteDatabase()` from inside the page: the app's own
-  // `getDB()` (src/lib/db/client.ts) caches a single connection in a
-  // module-level variable, but nothing stops its several data-fetching
-  // hooks from all calling `getDB()` concurrently on first mount before
-  // that variable is set — each such race opens its own independent
-  // IDBDatabase connection, and only the last one survives in the cache.
-  // The app's `blocking()` handler closes whichever connection is
-  // currently cached, but any earlier, now-unreferenced connection from
-  // that race is never told to close, and a `deleteDatabase()` call waits
-  // indefinitely (spec behaviour, not a failure) for every open connection
-  // to close — verified live: it hangs forever in exactly this app.
-  // Clearing storage through the DevTools protocol instead acts below the
-  // page's JS entirely, so it isn't affected by that connection leak.
+  // Not `indexedDB.deleteDatabase()` from inside the page: the app's
+  // `getDB()` (src/lib/db/client.ts) now caches the pending promise so
+  // concurrent callers share one connection, and `blocking()` closes it.
+  // That fixes the connection-leak hang this comment previously documented.
+  // The CDP approach is still preferred here because it acts below the
+  // page's JS entirely, so it works regardless of app-level caching.
   const cdpSession = await page.context().newCDPSession(page);
   await cdpSession.send("Storage.clearDataForOrigin", {
     origin: new URL(APP_URL).origin,
