@@ -1842,6 +1842,24 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- DB client regression (APP-172985) ----------------------------------------
+
+check("getDB caches the pending promise, not the resolved connection (APP-172985)", () => {
+  const clientSrc = readFileSync(path.resolve(BOT_DIR, "..", "src", "lib", "db", "client.ts"), "utf8");
+  // The module must cache a Promise, not a bare IDBPDatabase, so concurrent
+  // callers share the same open rather than each opening their own connection.
+  assert.ok(
+    /\blet\s+\w+\s*:\s*Promise<IDBPDatabase/.test(clientSrc),
+    "client.ts must cache a Promise<IDBPDatabase>, not a bare IDBPDatabase — see APP-172985",
+  );
+  // The old pattern `dbInstance = await openDB(...)` is the bug: the await
+  // means every caller that enters before it resolves starts its own openDB.
+  assert.ok(
+    !/\bawait\s+openDB\b/.test(clientSrc),
+    "client.ts must not await openDB inline — cache the promise instead",
+  );
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
