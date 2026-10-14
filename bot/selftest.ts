@@ -1842,6 +1842,18 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- DB client: promise-caching regression (APP-172985) ----------------------
+
+check("getDB() caches the pending promise, not the resolved instance (APP-172985)", () => {
+  const clientSrc = readFileSync(path.resolve(BOT_DIR, "../src/lib/db/client.ts"), "utf8");
+  // A resolved-instance cache (`let dbInstance`) lets concurrent callers each
+  // open their own IDBDatabase before the first one resolves.  Caching the
+  // promise itself (`let dbPromise`) makes every concurrent caller share one
+  // open, which is the fix for APP-172985.
+  assert.ok(/\blet\s+dbPromise\b/.test(clientSrc), "client.ts must cache the promise (dbPromise), not the resolved instance");
+  assert.ok(!/\blet\s+dbInstance\b/.test(clientSrc), "client.ts must not use a resolved-instance cache (dbInstance) — see APP-172985");
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
