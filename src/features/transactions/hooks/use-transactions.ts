@@ -32,7 +32,6 @@ export async function notifyBudgetThreshold(
   pendo?.track("budget_threshold_crossed", {
     level: alert.level,
     categoryId: alert.categoryId,
-    categoryName,
     spent: alert.spent,
     monthlyLimit: alert.monthlyLimit,
     percentUsed: percent,

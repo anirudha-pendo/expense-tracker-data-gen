@@ -37,7 +37,6 @@ function BudgetRowForm({ category, currentLimit, currency, locale, onSave, onCle
       await onSave(category.id, parsed);
       pendo?.track("budget_set", {
         categoryId: category.id,
-        categoryName: category.name,
         monthlyLimit: parsed,
       });
       toast.success(`Budget set for ${category.name}`);
@@ -56,7 +55,6 @@ function BudgetRowForm({ category, currentLimit, currency, locale, onSave, onCle
       setValue("");
       pendo?.track("budget_cleared", {
         categoryId: category.id,
-        categoryName: category.name,
       });
       toast.success(`Budget cleared for ${category.name}`);
     } catch {

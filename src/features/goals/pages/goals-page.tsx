@@ -80,7 +80,7 @@ export function GoalsPage() {
       const totalSaved = contributingGoal.contributions.reduce((s, c) => s + c.amount, 0) + values.amount;
       pendo?.track("goal_contribution_added", {
         amount: values.amount,
-        goalName: contributingGoal.name,
+        goalId: contributingGoal.id,
         goalTargetAmount: contributingGoal.targetAmount,
         totalSavedAfter: totalSaved,
         percentCompleteAfter: Math.round((totalSaved / contributingGoal.targetAmount) * 100),
@@ -99,7 +99,7 @@ export function GoalsPage() {
       await removeGoal(deletingGoal.id);
       const totalSaved = deletingGoal.contributions.reduce((s, c) => s + c.amount, 0);
       pendo?.track("goal_deleted", {
-        goalName: deletingGoal.name,
+        goalId: deletingGoal.id,
         targetAmount: deletingGoal.targetAmount,
         contributionCount: deletingGoal.contributions.length,
         percentComplete: Math.round((totalSaved / deletingGoal.targetAmount) * 100),

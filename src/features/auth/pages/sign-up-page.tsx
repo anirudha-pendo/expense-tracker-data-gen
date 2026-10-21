@@ -18,7 +18,6 @@ export function SignUpPage() {
         password: values.password,
       });
       pendo?.track("account_created", {
-        username: values.username,
         hasDisplayName: Boolean(values.displayName),
       });
       navigate("/setup-workspace", { replace: true });

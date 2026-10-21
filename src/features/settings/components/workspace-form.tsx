@@ -73,7 +73,7 @@ export function WorkspaceForm() {
       pendo?.track("workspace_settings_updated", {
         currency: values.currency,
         locale: values.locale,
-        workspaceName: values.name,
+        nameChanged: values.name !== workspace.name,
       });
       toast.success("Workspace settings saved");
     } catch {
