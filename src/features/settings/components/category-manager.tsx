@@ -205,7 +205,7 @@ export function CategoryManager() {
       await createCategory(cat);
       await reload();
       pendo?.track("category_created", {
-        categoryName: values.name,
+        categoryId: cat.id,
         scope: values.scope,
         color: values.color,
       });
@@ -222,10 +222,10 @@ export function CategoryManager() {
       await updateCategory({ ...editingCat, ...values });
       await reload();
       pendo?.track("category_updated", {
-        categoryName: values.name,
+        categoryId: editingCat.id,
+        nameChanged: values.name !== editingCat.name,
         scope: values.scope,
         color: values.color,
-        previousName: editingCat.name,
         previousScope: editingCat.scope,
       });
       setEditingCat(null);
@@ -241,7 +241,7 @@ export function CategoryManager() {
       await deleteCategory(deletingCat.id);
       await reload();
       pendo?.track("category_deleted", {
-        categoryName: deletingCat.name,
+        categoryId: deletingCat.id,
         scope: deletingCat.scope,
       });
       setDeletingCat(null);
