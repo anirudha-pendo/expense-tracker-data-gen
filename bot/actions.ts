@@ -41,6 +41,7 @@ import {
   TRANSACTION_BACKDATE_MAX_DAYS,
   TRANSACTION_NOTES_RATE,
   TRANSACTION_RECURRING_RATE,
+  TRANSACTION_RECEIPT_RATE,
   FALLBACK_AMOUNT_MIN,
   FALLBACK_AMOUNT_MAX,
   ROW_PICK_LIMIT,
@@ -482,6 +483,28 @@ const CONTRIBUTION_NOTE_POOL = [
   "Extra put aside this month",
 ];
 
+// The receipt a new transaction sometimes gets. A PDF, because the dialog
+// shows a PDF as an icon and its file name rather than its contents, so this
+// one looks like any other receipt there; made-up image bytes would show as a
+// broken thumbnail. It is still a minimal PDF rather than junk: one blank page,
+// 80 mm wide like a till roll. The app checks only the type (an image or a
+// PDF) and the size (5 MB at most).
+const RECEIPT_FILE = {
+  name: "receipt.pdf",
+  mimeType: "application/pdf",
+  buffer: Buffer.from(
+    [
+      "%PDF-1.4",
+      "1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj",
+      "2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj",
+      "3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 226 400]>> endobj",
+      "trailer <</Root 1 0 R>>",
+      "%%EOF",
+      "",
+    ].join("\n"),
+  ),
+};
+
 const ALL_CATEGORY_SEEDS: CategorySeed[] = [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS];
 
 function categorySeedByName(name: string): CategorySeed | undefined {
@@ -754,6 +777,23 @@ async function runAddTransaction(page: Page, ctx: SessionCtx): Promise<void> {
   }
   if (ctx.rng.chance(TRANSACTION_NOTES_RATE)) {
     await dialog.locator("#notes").fill(ctx.rng.pick(TRANSACTION_NOTE_POOL));
+  }
+  if (ctx.rng.chance(TRANSACTION_RECEIPT_RATE)) {
+    // "Attach receipt" clicks a hidden file input, so the click opens the OS
+    // file picker, which Playwright hands over as a file chooser. Clicking the
+    // visible button rather than setting files on that hidden input is what
+    // records the click. Both are awaited together so a click that throws
+    // cannot leave the chooser wait to reject unhandled.
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: DIALOG_TIMEOUT_MS }),
+      dialog.getByRole("button", { name: "Attach receipt", exact: true }).click(),
+    ]);
+    await chooser.setFiles(RECEIPT_FILE);
+    // Staged, not saved, until the submit below. Its thumbnail is the proof the
+    // app accepted the file: a rejected one gets an error toast instead.
+    await dialog
+      .getByRole("button", { name: `View ${RECEIPT_FILE.name}`, exact: true })
+      .waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
   }
 
   await dialog.getByRole("button", { name: "Add transaction", exact: true }).click();

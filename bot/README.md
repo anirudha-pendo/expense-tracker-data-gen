@@ -130,6 +130,7 @@ what they affect.
 | `ABANDON_VIA_ESCAPE_RATE` (0.5) | An abandoned dialog closes via Escape rather than the Cancel button. | 0–1. |
 | `TRANSACTION_NOTES_RATE` (0.25) | A new transaction gets an optional note. | 0–1. |
 | `TRANSACTION_RECURRING_RATE` (0.12) | A new transaction is flagged recurring. | 0–1. |
+| `TRANSACTION_RECEIPT_RATE` (0.15) | A new transaction gets a receipt attached through "Attach receipt" and the file picker. | 0–1. |
 | `EDIT_DESCRIPTION_RATE` (0.6) | Editing a transaction also rewrites its description (the amount always changes). | 0–1. |
 | `CONTRIBUTION_NOTE_RATE` (0.4) | A goal contribution gets an optional note. | 0–1. |
 | `WORKSPACE_CURRENCY_CHANGE_RATE` / `WORKSPACE_LOCALE_CHANGE_RATE` (0.25 each) | Updating workspace settings also changes the currency / number-format select. | 0–1. |
