@@ -41,6 +41,7 @@ import {
   TRANSACTION_BACKDATE_MAX_DAYS,
   TRANSACTION_NOTES_RATE,
   TRANSACTION_RECURRING_RATE,
+  TRANSACTION_RECEIPT_RATE,
   FALLBACK_AMOUNT_MIN,
   FALLBACK_AMOUNT_MAX,
   ROW_PICK_LIMIT,
@@ -482,6 +483,35 @@ const CONTRIBUTION_NOTE_POOL = [
   "Extra put aside this month",
 ];
 
+// The file the bot picks when it attaches a receipt. The app accepts a file on
+// its type and size alone (an image or a PDF, at most 5 MB) and never reads the
+// bytes, but this is still a real PDF — one blank, receipt-roll-sized page — so
+// it opens in a viewer. The xref numbers are byte offsets into the lines above
+// them: change an object line and they have to be recomputed.
+const RECEIPT_FILE = {
+  name: "receipt.pdf",
+  mimeType: "application/pdf",
+  buffer: Buffer.from(
+    [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 226 600] >> endobj",
+      "xref",
+      "0 4",
+      "0000000000 65535 f ",
+      "0000000009 00000 n ",
+      "0000000058 00000 n ",
+      "0000000115 00000 n ",
+      "trailer << /Size 4 /Root 1 0 R >>",
+      "startxref",
+      "186",
+      "%%EOF",
+      "",
+    ].join("\n"),
+  ),
+};
+
 const ALL_CATEGORY_SEEDS: CategorySeed[] = [...DEFAULT_CATEGORY_SEEDS, ...CUSTOM_CATEGORY_SEEDS];
 
 function categorySeedByName(name: string): CategorySeed | undefined {
@@ -672,6 +702,29 @@ async function openRowMenuItem(page: Page, row: Locator, item: "Edit" | "Delete"
   await page.getByRole("menuitem", { name: item, exact: true }).click();
 }
 
+/**
+ * Attaches `RECEIPT_FILE` in the open transaction dialog the way a person
+ * does: clicks "Attach receipt", which opens the file chooser from a hidden
+ * input, and picks the file there. Going through the button rather than
+ * setting the hidden input's files directly is the point — that click is the
+ * receipt feature being used, and skipping it would leave the button reading
+ * as dead even while uploads arrive. The staged thumbnail only renders once
+ * the app has accepted the file, so its appearance is proof the upload landed.
+ */
+async function attachReceipt(page: Page, dialog: Locator): Promise<void> {
+  // Promise.all, not a wait started before the click and awaited after it: if
+  // the click throws, that dangling wait rejects with nobody listening once it
+  // times out, and an unhandled rejection takes the whole run down.
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser", { timeout: DIALOG_TIMEOUT_MS }),
+    dialog.getByRole("button", { name: "Attach receipt", exact: true }).click(),
+  ]);
+  await chooser.setFiles(RECEIPT_FILE);
+  await dialog
+    .getByRole("button", { name: `View ${RECEIPT_FILE.name}`, exact: true })
+    .waitFor({ state: "visible", timeout: DIALOG_TIMEOUT_MS });
+}
+
 // The transactions filter bar holds the page's only two Radix Selects, in
 // source order: type first, then category. Neither has an id, a name or an
 // aria-label (see the ui map), so position within the bar is the only handle
@@ -754,6 +807,9 @@ async function runAddTransaction(page: Page, ctx: SessionCtx): Promise<void> {
   }
   if (ctx.rng.chance(TRANSACTION_NOTES_RATE)) {
     await dialog.locator("#notes").fill(ctx.rng.pick(TRANSACTION_NOTE_POOL));
+  }
+  if (ctx.rng.chance(TRANSACTION_RECEIPT_RATE)) {
+    await attachReceipt(page, dialog);
   }
 
   await dialog.getByRole("button", { name: "Add transaction", exact: true }).click();

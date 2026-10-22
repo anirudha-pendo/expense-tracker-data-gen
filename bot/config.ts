@@ -289,6 +289,8 @@ export const TRANSACTION_BACKDATE_MAX_DAYS = 21;
 export const TRANSACTION_NOTES_RATE = 0.25;
 /** Chance a newly entered transaction is flagged recurring. */
 export const TRANSACTION_RECURRING_RATE = 0.12;
+/** Chance a newly entered transaction gets a receipt attached. */
+export const TRANSACTION_RECEIPT_RATE = 0.15;
 /** Amount range used when a picked category has no entry in the seed-data amount tables (e.g. a category the bot itself created earlier). */
 export const FALLBACK_AMOUNT_MIN = 5;
 export const FALLBACK_AMOUNT_MAX = 250;
