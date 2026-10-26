@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createTransaction, getTransactionsByWorkspaceId } from "@/lib/db/repositories/transactions.repo";
+import { createAttachment } from "@/lib/db/repositories/attachments.repo";
 import { getCategoriesByWorkspaceId } from "@/lib/db/repositories/categories.repo";
 import { notifyBudgetThreshold } from "@/features/transactions/hooks/use-transactions";
+import { MAX_FILE_SIZE } from "@/features/transactions/hooks/use-attachments";
 import { emitDataChanged } from "@/shared/lib/data-events";
 import { parseQuickAdd, type ParsedQuickAdd } from "../lib/parser";
 import type { Category, Transaction } from "@/types";
@@ -95,7 +97,46 @@ export function useQuickAdd(workspaceId: string, open: boolean): UseQuickAddRetu
       setInput("");
       setOverrideCategory(null);
       emitDataChanged();
-      toast.success(`Added: ${tx.description}`);
+      toast.success(`Added: ${tx.description}`, {
+        action: {
+          label: "Attach receipt",
+          onClick: () => {
+            const fileInput = document.createElement("input");
+            fileInput.type = "file";
+            fileInput.accept = "image/*,application/pdf";
+            fileInput.addEventListener("change", async () => {
+              const file = fileInput.files?.[0];
+              if (!file) return;
+              if (file.size > MAX_FILE_SIZE) {
+                toast.error(`${file.name}: file is larger than 5 MB`);
+                return;
+              }
+              try {
+                await createAttachment({
+                  id: crypto.randomUUID(),
+                  workspaceId,
+                  transactionId: tx.id,
+                  name: file.name,
+                  mimeType: file.type,
+                  size: file.size,
+                  blob: file,
+                  createdAt: new Date().toISOString(),
+                });
+                pendo?.track("attachment_uploaded", {
+                  mimeType: file.type,
+                  fileSize: file.size,
+                  source: "quick_add_toast",
+                });
+                emitDataChanged();
+                toast.success("Receipt attached");
+              } catch {
+                toast.error("Failed to attach receipt");
+              }
+            });
+            fileInput.click();
+          },
+        },
+      });
     } catch {
       toast.error("Failed to add transaction");
     } finally {
