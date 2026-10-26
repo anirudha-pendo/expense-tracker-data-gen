@@ -115,10 +115,12 @@ export function GoalsPage() {
     <AppLayout
       title="Goals"
       actions={
-        <Button onClick={() => setShowForm(true)} size="sm">
-          <Plus data-icon="inline-start" />
-          New Goal
-        </Button>
+        isLoading || goals.length > 0 ? (
+          <Button onClick={() => setShowForm(true)} size="sm">
+            <Plus data-icon="inline-start" />
+            New Goal
+          </Button>
+        ) : undefined
       }
     >
       {isLoading ? (

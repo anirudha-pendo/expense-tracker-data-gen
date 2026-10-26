@@ -21,7 +21,7 @@ Stack facts that affect selector strategy:
 | `/` | `ProtectedRoute` (auth + workspace) | `DashboardPage` | `AppLayout` renders `<h1>` with text **"Dashboard"** (uppercase via CSS, actual text content is `Dashboard`) immediately; but data is async — true "content loaded" signal is the disappearance of `Skeleton` placeholders / presence of text "Income" in the summary cards |
 | `/transactions` | `ProtectedRoute` | `TransactionsPage` | `<h1>` "Transactions"; `getByRole("button", { name: "Add Transaction" })`; table headers "Description"/"Category"/... appear once `isLoading` is false |
 | `/insights` | `ProtectedRoute` | `InsightsPage` | `<h1>` "Insights"; then either empty-state text **"No data to analyze yet"** or (once there are transactions) the `ForecastCard` header text **"End-of-Month Forecast"** |
-| `/goals` | `ProtectedRoute` | `GoalsPage` | `<h1>` "Goals"; `getByRole("button", { name: "New Goal" })`; empty-state text **"No savings goals yet"** or `GoalCard`s |
+| `/goals` | `ProtectedRoute` | `GoalsPage` | `<h1>` "Goals"; `getByRole("button", { name: "New Goal" })` (hidden when empty state is showing); empty-state text **"No savings goals yet"** with **"Create your first goal"** button, or `GoalCard`s |
 | `/settings` | `ProtectedRoute` | `SettingsPage` | `<h1>` "Settings"; 5 section header labels: "Profile", "Workspace", "Categories", "Budgets", "Data" |
 | `*` | — | redirects to `/` | — |
 
@@ -226,8 +226,8 @@ contributionSchema = {
 ```
 
 ### Goals page
-- **"New Goal"** button (page header) — opens `GoalFormDialog` (Add mode).
-- Empty state additionally shows **"Create your first goal"** button — same handler.
+- **"New Goal"** button (page header) — opens `GoalFormDialog` (Add mode). **Hidden when the empty state is showing** (no goals exist).
+- Empty state shows **"Create your first goal"** button instead — same handler, sole entry point for first-time goal creators.
 - Per `GoalCard` (**not unique**, scope by the card containing the goal's name):
   - Edit icon button — `sr-only` text **"Edit goal"**.
   - Delete icon button — `sr-only` text **"Delete goal"**.
