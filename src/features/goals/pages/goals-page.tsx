@@ -138,7 +138,15 @@ export function GoalsPage() {
               Create a goal like &ldquo;Vacation: $2,000&rdquo;, add money toward it, and track your
               projected completion date.
             </p>
-            <Button size="sm" className="mt-2" onClick={() => setShowForm(true)}>
+            <Button
+              size="sm"
+              className="mt-2"
+              data-pendo-id="goal-empty-state-cta"
+              onClick={() => {
+                pendo?.track("goal_empty_state_cta_clicked");
+                setShowForm(true);
+              }}
+            >
               <Plus data-icon="inline-start" />
               Create your first goal
             </Button>
