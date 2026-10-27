@@ -6,15 +6,12 @@ import { SignInForm } from "../components/sign-in-form";
 import type { SignInFormValues } from "../schemas/auth.schema";
 
 export function SignInPage() {
-  const { signIn, hasWorkspace } = useAuthContext();
+  const { signIn } = useAuthContext();
   const navigate = useNavigate();
 
   async function handleSignIn(values: SignInFormValues) {
     try {
-      await signIn(values.email, values.password);
-      pendo?.track("sign_in_completed", {
-        hasWorkspace,
-      });
+      const { hasWorkspace } = await signIn(values.email, values.password);
       navigate(hasWorkspace ? "/" : "/setup-workspace", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");
