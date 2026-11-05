@@ -87,8 +87,8 @@ export function ProfileForm() {
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label>Username</Label>
-        <Input value={user?.username ?? ""} disabled />
+        <Label htmlFor="username">Username</Label>
+        <Input id="username" value={user?.username ?? ""} disabled />
         <p className="text-xs text-muted-foreground">Username cannot be changed.</p>
       </div>
 
