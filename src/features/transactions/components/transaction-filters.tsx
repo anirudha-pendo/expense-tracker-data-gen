@@ -67,7 +67,7 @@ export function TransactionFiltersBar({ filters, categories, onChange }: Transac
         value={categorySelectValue}
         onValueChange={handleCategoryChange}
       >
-        <SelectTrigger className="w-[160px]">
+        <SelectTrigger className="w-[160px]" aria-label="Category">
           <SelectValue placeholder="Category" />
         </SelectTrigger>
         <SelectContent>

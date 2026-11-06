@@ -82,7 +82,7 @@ function CategoryFormDialog({ open, defaultValues, onSubmit, onCancel }: Categor
           <div className="flex flex-col gap-2">
             <Label>Applies to</Label>
             <Select value={scope} onValueChange={(v) => setValue("scope", v as CategoryScope)}>
-              <SelectTrigger>
+              <SelectTrigger aria-label="Applies to">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -119,6 +119,7 @@ function CategoryFormDialog({ open, defaultValues, onSubmit, onCancel }: Categor
                 className="size-8 cursor-pointer rounded border"
               />
               <Input
+                aria-label="Color hex value"
                 value={selectedColor}
                 onChange={(e) => setValue("color", e.target.value)}
                 placeholder="#000000"
