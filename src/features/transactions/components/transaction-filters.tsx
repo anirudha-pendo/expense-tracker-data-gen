@@ -41,6 +41,7 @@ export function TransactionFiltersBar({ filters, categories, onChange }: Transac
       <div className="relative flex-1 min-w-[180px]">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
         <Input
+          aria-label="Search transactions"
           placeholder="Search transactions..."
           value={filters.search}
           onChange={(e) => onChange({ ...filters, search: e.target.value })}
@@ -83,6 +84,7 @@ export function TransactionFiltersBar({ filters, categories, onChange }: Transac
       </Select>
 
       <Input
+        aria-label="Filter by month"
         type="month"
         value={filters.month}
         onChange={(e) => onChange({ ...filters, month: e.target.value })}
