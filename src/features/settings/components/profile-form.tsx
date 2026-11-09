@@ -93,13 +93,13 @@ export function ProfileForm() {
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label>Email</Label>
+        <Label htmlFor="email">Email</Label>
         {/* `?? ""` is load-bearing: accounts created before email existed have
             no such field, and a bare `user?.email` would make this a React
             uncontrolled-input warning showing nothing. The helper text below
             says so, because an unexplained blank box on the field you now
             sign in with reads as data loss. */}
-        <Input value={user?.email ?? ""} disabled />
+        <Input id="email" value={user?.email ?? ""} disabled />
         <p className="text-xs text-muted-foreground">
           {user?.email
             ? "Email cannot be changed."
