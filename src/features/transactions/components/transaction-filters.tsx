@@ -53,7 +53,7 @@ export function TransactionFiltersBar({ filters, categories, onChange }: Transac
         value={filters.type}
         onValueChange={(v) => onChange({ ...filters, type: v as TransactionFilters["type"] })}
       >
-        <SelectTrigger className="w-[130px]">
+        <SelectTrigger className="w-[130px]" aria-label="Type">
           <SelectValue placeholder="Type" />
         </SelectTrigger>
         <SelectContent>
