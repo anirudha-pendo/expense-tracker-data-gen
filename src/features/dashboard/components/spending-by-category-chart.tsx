@@ -6,6 +6,7 @@ import type { CategorySpend } from "../hooks/use-dashboard-stats";
 
 interface SpendingByCategoryChartProps {
   data: CategorySpend[];
+  totalExpenses: number;
   currency: string;
   locale: string;
   isLoading: boolean;
@@ -32,7 +33,7 @@ function CustomTooltip({ active, payload, currency, locale }: {
   );
 }
 
-export function SpendingByCategoryChart({ data, currency, locale, isLoading }: SpendingByCategoryChartProps) {
+export function SpendingByCategoryChart({ data, totalExpenses, currency, locale, isLoading }: SpendingByCategoryChartProps) {
   if (isLoading) {
     return (
       <BpBox>
@@ -45,8 +46,6 @@ export function SpendingByCategoryChart({ data, currency, locale, isLoading }: S
       </BpBox>
     );
   }
-
-  const total = data.reduce((sum, d) => sum + d.amount, 0);
 
   return (
     <BpBox className="section-enter">
@@ -100,7 +99,7 @@ export function SpendingByCategoryChart({ data, currency, locale, isLoading }: S
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <p className="font-mono text-[9px] text-muted-foreground/50 tracking-wider uppercase">total</p>
                 <p className="font-mono text-sm font-semibold tabular-nums text-foreground">
-                  {formatCurrency(total, currency, locale)}
+                  {formatCurrency(totalExpenses, currency, locale)}
                 </p>
               </div>
             </div>
