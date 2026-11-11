@@ -37,6 +37,29 @@ const LOCALES = [
   { code: "zh-CN", label: "Chinese (China)" },
 ];
 
+const REGION_TO_CURRENCY: Record<string, string> = {
+  US: "USD",
+  GB: "GBP",
+  IN: "INR",
+  DE: "EUR",
+  FR: "EUR",
+  JP: "JPY",
+  CN: "CNY",
+  CA: "CAD",
+  AU: "AUD",
+  CH: "CHF",
+};
+
+function getBrowserLocaleDefaults(): { currency: string; locale: string } {
+  const browserLang = navigator.language;
+  const matched = LOCALES.find((l) => l.code === browserLang)
+    ?? LOCALES.find((l) => l.code.split("-")[0] === browserLang.split("-")[0]);
+  const locale = matched?.code ?? "en-US";
+  const region = locale.split("-")[1];
+  const currency = REGION_TO_CURRENCY[region] ?? "USD";
+  return { currency, locale };
+}
+
 interface WorkspaceSetupFormProps {
   onSubmit: (values: WorkspaceFormValues) => Promise<void>;
 }
@@ -50,7 +73,7 @@ export function WorkspaceSetupForm({ onSubmit }: WorkspaceSetupFormProps) {
     formState: { errors, isSubmitting },
   } = useForm<WorkspaceFormValues>({
     resolver: zodResolver(workspaceSchema),
-    defaultValues: { currency: "USD", locale: "en-US" },
+    defaultValues: getBrowserLocaleDefaults(),
   });
 
   return (
