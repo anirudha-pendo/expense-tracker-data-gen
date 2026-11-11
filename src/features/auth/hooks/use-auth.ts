@@ -31,7 +31,7 @@ export interface SignUpInput {
 
 interface AuthActions {
   signUp: (input: SignUpInput) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<{ hasWorkspace: boolean }>;
   signOut: () => void;
   setActiveWorkspace: (workspace: Workspace) => void;
   refreshUser: () => Promise<void>;
@@ -135,6 +135,14 @@ export function useAuth(): AuthState & AuthActions {
     const workspaces = await getWorkspacesByUserId(storedUser.id);
     const activeWorkspace = workspaces[0] ?? null;
     setWorkspace(activeWorkspace);
+
+    const hasWorkspace = !!activeWorkspace;
+
+    // Fire sign_in_completed BEFORE identify so the page visit and the
+    // completion event stay in the same (anonymous) session. Calling
+    // identify first would start a new identified session, splitting the
+    // funnel across two unlinked sessions.
+    pendo?.track("sign_in_completed", { hasWorkspace });
     identify(storedUser, activeWorkspace);
 
     const session: Session = {
@@ -142,6 +150,8 @@ export function useAuth(): AuthState & AuthActions {
       workspaceId: activeWorkspace?.id ?? "",
     };
     saveSession(session);
+
+    return { hasWorkspace };
   }, []);
 
   const signOut = useCallback(() => {
