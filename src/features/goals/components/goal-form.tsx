@@ -53,6 +53,7 @@ export function GoalFormDialog({ open, defaultValues, onSubmit, onCancel }: Goal
             <Label htmlFor="goal-name">Name</Label>
             <Input
               id="goal-name"
+              autoComplete="off"
               placeholder="e.g. Vacation fund"
               aria-invalid={!!errors.name}
               {...register("name")}
