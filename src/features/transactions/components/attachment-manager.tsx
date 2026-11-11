@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Paperclip, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { AttachmentViewer, type ViewerItem } from "./attachment-viewer";
@@ -151,16 +150,14 @@ export function AttachmentManager({ manager }: AttachmentManagerProps) {
         }}
       />
       {manager.totalCount < MAX_FILES_PER_TRANSACTION && (
-        <Button
+        <button
           type="button"
-          variant="outline"
-          size="sm"
-          className="w-fit"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border/60 py-3 text-sm text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground active:scale-[0.97]"
           onClick={() => fileInputRef.current?.click()}
         >
-          <Paperclip data-icon="inline-start" />
+          <Paperclip className="size-4" />
           Attach receipt
-        </Button>
+        </button>
       )}
 
       <AttachmentViewer item={viewing} onClose={() => setViewing(null)} />
