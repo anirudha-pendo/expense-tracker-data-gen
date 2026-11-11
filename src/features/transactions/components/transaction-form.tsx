@@ -37,9 +37,7 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
       amount: defaultValues?.amount,
       categoryId: defaultValues?.categoryId ?? "",
       description: defaultValues?.description ?? "",
-      date: defaultValues?.date
-        ? format(new Date(defaultValues.date), "yyyy-MM-dd")
-        : format(new Date(), "yyyy-MM-dd"),
+      date: defaultValues?.date ?? format(new Date(), "yyyy-MM-dd"),
       isRecurring: defaultValues?.isRecurring ?? false,
       notes: defaultValues?.notes ?? "",
     },

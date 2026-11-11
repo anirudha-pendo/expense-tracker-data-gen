@@ -36,6 +36,7 @@ import {
 import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
 import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
+import { parseCalendarDate, localIsoDate } from "../src/lib/dates";
 import {
   ARCHETYPE_STYLE,
   BANKED_FOLLOWUP_KINDS,
@@ -490,6 +491,19 @@ check("buildIdentifyOptions omits the email key for a user that has none", () =>
     !("email" in options.visitor),
     "an absent email must not become `email: undefined` — Pendo would store the key and the visitor would read as having a blank email",
   );
+});
+
+// --- Date handling (APP-173133) -----------------------------------------------
+
+check("parseCalendarDate preserves year, month and day as local-time components", () => {
+  const samples = ["2024-01-01", "2024-06-15", "2024-12-31", "2023-02-28", "2025-03-31"];
+  for (const iso of samples) {
+    const d = parseCalendarDate(iso);
+    assert.strictEqual(d.getFullYear(), Number(iso.slice(0, 4)), `year of "${iso}"`);
+    assert.strictEqual(d.getMonth(), Number(iso.slice(5, 7)) - 1, `month of "${iso}"`);
+    assert.strictEqual(d.getDate(), Number(iso.slice(8, 10)), `day of "${iso}"`);
+    assert.strictEqual(localIsoDate(d), iso, `localIsoDate round-trip of "${iso}"`);
+  }
 });
 
 // --- Assistant prompts ---------------------------------------------------------
