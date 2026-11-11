@@ -1842,6 +1842,29 @@ check("one power and one casual persona see many wordings of one question, none 
   }
 });
 
+// --- Goal projection: deadline comparison (APP-172986) -----------------------
+
+import { localIsoDate } from "../src/lib/dates";
+
+check("localIsoDate comparison handles deadline-day projection without timezone drift (APP-172986)", () => {
+  const deadline = "2026-12-31";
+
+  // Projected date that is the same local calendar day as the deadline.
+  // The old code did `new Date("2026-12-31")` which is UTC midnight — in
+  // UTC-negative zones that shifts to 30 Dec local, causing a false "behind".
+  const onDeadline = new Date(2026, 11, 31, 10, 0, 0); // 31 Dec local
+  assert.strictEqual(localIsoDate(onDeadline), deadline);
+  assert.ok(localIsoDate(onDeadline) <= deadline, "projected on deadline day should be on track");
+
+  // Projected date one day before the deadline.
+  const beforeDeadline = new Date(2026, 11, 30, 10, 0, 0);
+  assert.ok(localIsoDate(beforeDeadline) <= deadline, "projected before deadline should be on track");
+
+  // Projected date one day after the deadline.
+  const afterDeadline = new Date(2027, 0, 1, 10, 0, 0); // 1 Jan 2027
+  assert.ok(localIsoDate(afterDeadline) > deadline, "projected after deadline should be behind");
+});
+
 // --- Summary -----------------------------------------------------------------
 
 console.log(`selftest: ${checksPassed} checks passed`);
