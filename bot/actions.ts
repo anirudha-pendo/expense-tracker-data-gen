@@ -873,7 +873,12 @@ async function runClearFilters(page: Page, ctx: SessionCtx): Promise<void> {
 
 async function runAddGoal(page: Page, ctx: SessionCtx): Promise<void> {
   await ensureRoute(page, "goals");
-  await page.getByRole("button", { name: "New Goal", exact: true }).click();
+  // The header "New Goal" button is hidden when the empty state is showing;
+  // visitors with no goals see "Create your first goal" instead.
+  await page
+    .getByRole("button", { name: "New Goal", exact: true })
+    .or(page.getByRole("button", { name: "Create your first goal", exact: true }))
+    .click();
   const dialog = await waitForDialogOpen(page, "New Goal");
 
   const seed = ctx.rng.pick(GOAL_SEED_POOL);
