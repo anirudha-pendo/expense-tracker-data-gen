@@ -8,6 +8,7 @@ import { getCategoriesByWorkspaceId } from "@/lib/db/repositories/categories.rep
 import { getGoalsByWorkspaceId, createGoal } from "@/lib/db/repositories/goals.repo";
 import { getBudgetsByWorkspaceId, upsertBudget } from "@/lib/db/repositories/budgets.repo";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
+import { csvField } from "@/lib/format";
 import type { Budget, Goal, Transaction } from "@/types";
 
 export function DataExportImport() {
@@ -58,11 +59,11 @@ export function DataExportImport() {
         t.id,
         t.type,
         t.amount.toFixed(2),
-        catMap.get(t.categoryId) ?? "",
-        `"${t.description.replace(/"/g, '""')}"`,
+        csvField(catMap.get(t.categoryId) ?? ""),
+        csvField(t.description),
         t.date,
         t.isRecurring ? "Yes" : "No",
-        `"${t.notes.replace(/"/g, '""')}"`,
+        csvField(t.notes),
       ]);
       const csv = [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
       const blob = new Blob([csv], { type: "text/csv" });

@@ -8,6 +8,11 @@ export function formatCurrency(amount: number, currency: string, locale: string)
   }).format(amount);
 }
 
+/** Wrap a value for CSV: double-quote the field and escape embedded quotes by doubling them. */
+export function csvField(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
 export function formatDate(dateString: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     year: "numeric",

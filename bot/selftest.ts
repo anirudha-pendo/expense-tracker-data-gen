@@ -36,6 +36,7 @@ import {
 import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
 import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
+import { csvField } from "../src/lib/format";
 import {
   ARCHETYPE_STYLE,
   BANKED_FOLLOWUP_KINDS,
@@ -1840,6 +1841,32 @@ check("one power and one casual persona see many wordings of one question, none 
       assert.ok(Math.max(...counts.values()) <= 75, `${label}: one template took ${Math.max(...counts.values())} of 300`);
     }
   }
+});
+
+// --- CSV field escaping (APP-172983) -----------------------------------------
+
+check("csvField quotes values and escapes embedded double-quotes and commas", () => {
+  assert.strictEqual(csvField(""), '""');
+  assert.strictEqual(csvField("simple"), '"simple"');
+  assert.strictEqual(csvField("Bills, Fees"), '"Bills, Fees"');
+  assert.strictEqual(csvField('He said "hi"'), '"He said ""hi"""');
+  assert.strictEqual(csvField('a "b, c" d'), '"a ""b, c"" d"');
+
+  // Regression: a category with a comma must not add an extra CSV column.
+  const row = [
+    "id-1",
+    "expense",
+    "42.00",
+    csvField("Bills, Fees"),
+    csvField("Internet bill"),
+    "2026-10-01",
+    "No",
+    csvField("monthly"),
+  ].join(",");
+  // Strip quoted fields to neutral placeholders, then count commas.
+  const stripped = row.replace(/"(?:[^"]|"")*"/g, "X");
+  const fieldCount = stripped.split(",").length;
+  assert.strictEqual(fieldCount, 8, `expected 8 CSV fields, got ${fieldCount} from stripped: ${stripped}`);
 });
 
 // --- Summary -----------------------------------------------------------------
