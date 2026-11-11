@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
@@ -53,17 +53,34 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
     (c) => c.scope === type || c.scope === "both"
   );
 
+  // The category a type switch cleared, kept so the form can say so and put it
+  // back if the user switches to a type it applies to again.
+  const [clearedCategory, setClearedCategory] = useState<Category | null>(null);
+
   useEffect(() => {
     const current = categoryId;
     const isValid = filteredCategories.some((c) => c.id === current);
     if (!isValid) setValue("categoryId", "");
   }, [type, filteredCategories, categoryId, setValue]);
 
+  function handleTypeChange(nextType: TransactionFormValues["type"]) {
+    const appliesTo = (c: Category) => c.scope === nextType || c.scope === "both";
+    const current = categories.find((c) => c.id === categoryId);
+    if (!current && clearedCategory && appliesTo(clearedCategory)) {
+      setValue("categoryId", clearedCategory.id);
+      setClearedCategory(null);
+    } else if (current && !appliesTo(current)) {
+      setValue("categoryId", "");
+      setClearedCategory(current);
+    }
+    setValue("type", nextType);
+  }
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label>Transaction Type</Label>
-        <Tabs value={type} onValueChange={(v) => setValue("type", v as "income" | "expense")}>
+        <Tabs value={type} onValueChange={(v) => handleTypeChange(v as "income" | "expense")}>
           <TabsList className="w-full">
             <TabsTrigger value="expense" className="flex-1">Expense</TabsTrigger>
             <TabsTrigger value="income" className="flex-1">Income</TabsTrigger>
@@ -111,7 +128,13 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="category">Category</Label>
-        <Select value={categoryId} onValueChange={(v) => setValue("categoryId", v)}>
+        <Select
+          value={categoryId}
+          onValueChange={(v) => {
+            setValue("categoryId", v);
+            setClearedCategory(null);
+          }}
+        >
           <SelectTrigger id="category" aria-invalid={!!errors.categoryId}>
             <SelectValue placeholder="Select a category" />
           </SelectTrigger>
@@ -126,6 +149,11 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
             ))}
           </SelectContent>
         </Select>
+        {clearedCategory && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {clearedCategory.name} isn't an {type} category, so it was cleared. Pick another, or switch back to restore it.
+          </p>
+        )}
         {errors.categoryId && <p className="text-sm text-destructive">{errors.categoryId.message}</p>}
       </div>
 
