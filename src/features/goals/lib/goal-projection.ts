@@ -1,4 +1,5 @@
-import { addWeeks, differenceInCalendarWeeks, isBefore } from "date-fns";
+import { addWeeks, differenceInCalendarWeeks } from "date-fns";
+import { localIsoDate } from "@/lib/dates";
 import type { Goal } from "@/types";
 
 export interface GoalProjection {
@@ -33,7 +34,7 @@ export function projectGoal(goal: Goal, now: Date = new Date()): GoalProjection 
   const projectedDate = addWeeks(now, weeksToGo);
 
   const onTrack = goal.deadline
-    ? isBefore(projectedDate, new Date(goal.deadline)) || projectedDate.toDateString() === new Date(goal.deadline).toDateString()
+    ? localIsoDate(projectedDate) <= goal.deadline
     : undefined;
 
   return { ...base, projectedDate, onTrack };
