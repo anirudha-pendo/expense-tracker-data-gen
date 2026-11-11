@@ -4,12 +4,12 @@ import type { ExpenseTrackerDBSchema } from "./schema";
 const DB_NAME = "expense-tracker";
 const DB_VERSION = 3;
 
-let dbInstance: IDBPDatabase<ExpenseTrackerDBSchema> | null = null;
+let dbPromise: Promise<IDBPDatabase<ExpenseTrackerDBSchema>> | null = null;
 
-export async function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
-  if (dbInstance) return dbInstance;
+export function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
+  if (dbPromise) return dbPromise;
 
-  dbInstance = await openDB<ExpenseTrackerDBSchema>(DB_NAME, DB_VERSION, {
+  dbPromise = openDB<ExpenseTrackerDBSchema>(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, transaction) {
       if (oldVersion < 1) {
         const userStore = db.createObjectStore("users", { keyPath: "id" });
@@ -52,10 +52,17 @@ export async function getDB(): Promise<IDBPDatabase<ExpenseTrackerDBSchema>> {
     // Close this connection if another tab upgrades to a newer version,
     // otherwise the old tab would block the upgrade forever.
     blocking() {
-      dbInstance?.close();
-      dbInstance = null;
+      const pending = dbPromise;
+      dbPromise = null;
+      pending?.then((db) => db.close());
     },
   });
 
-  return dbInstance;
+  // If the open fails, clear the cached promise so a subsequent call can
+  // retry instead of returning the same rejection forever.
+  dbPromise.catch(() => {
+    dbPromise = null;
+  });
+
+  return dbPromise;
 }
