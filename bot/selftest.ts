@@ -36,6 +36,7 @@ import {
 import { planWorkspaceRename, runCapCutLine, takeRunTurn } from "./actions";
 import { checkPendo, comparePendoIds, formatAssistantBlock, formatBeaconLine, formatPendoBlock, formatPendoReading, isPendoBeacon } from "./run";
 import { buildIdentifyOptions } from "../src/lib/analytics";
+import { normalizeEmail } from "../src/lib/normalize-email";
 import {
   ARCHETYPE_STYLE,
   BANKED_FOLLOWUP_KINDS,
@@ -490,6 +491,17 @@ check("buildIdentifyOptions omits the email key for a user that has none", () =>
     !("email" in options.visitor),
     "an absent email must not become `email: undefined` — Pendo would store the key and the visitor would read as having a blank email",
   );
+});
+
+// --- Email normalization (APP-172984) -----------------------------------------
+
+check("normalizeEmail lowercases and trims so case-variant sign-ins resolve to the same account", () => {
+  assert.strictEqual(normalizeEmail("Jane.Doe@Example.com"), "jane.doe@example.com");
+  assert.strictEqual(normalizeEmail("jane.doe@example.com"), "jane.doe@example.com");
+  assert.strictEqual(normalizeEmail("  Alice@TEST.IO  "), "alice@test.io");
+  assert.strictEqual(normalizeEmail("BOB@bob.com"), "bob@bob.com");
+  // Already canonical — idempotent.
+  assert.strictEqual(normalizeEmail("user@host.com"), "user@host.com");
 });
 
 // --- Assistant prompts ---------------------------------------------------------
