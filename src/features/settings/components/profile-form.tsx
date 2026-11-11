@@ -72,7 +72,7 @@ export function ProfileForm() {
         </div>
         <div>
           <p className="font-mono text-[10px] tracking-widest uppercase text-foreground">{user?.displayName}</p>
-          <p className="font-mono text-[10px] tracking-wider text-muted-foreground">@{user?.username}</p>
+          <p className="font-mono text-[10px] font-bold tracking-wider text-muted-foreground">@{user?.username}</p>
         </div>
       </div>
 
