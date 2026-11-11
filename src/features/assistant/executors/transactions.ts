@@ -135,6 +135,15 @@ export async function applyTransactionProposal(workspaceId: string, proposal: Tr
       }
       emitDataChanged();
       toast.success(`Added: ${tx.description}`);
+      pendo?.track("transaction_created", {
+        type: tx.type,
+        amount: tx.amount,
+        categoryId: tx.categoryId,
+        isRecurring: tx.isRecurring,
+        hasNotes: Boolean(tx.notes),
+        attachmentCount: 0,
+        source: "assistant",
+      });
       reportThreshold(notifyBudgetThreshold(workspaceId, tx, prior, categories));
       return tx.id;
     }
@@ -150,6 +159,14 @@ export async function applyTransactionProposal(workspaceId: string, proposal: Tr
       }
       emitDataChanged();
       toast.success(`Updated: ${updated.description}`);
+      pendo?.track("transaction_updated", {
+        type: updated.type,
+        amount: updated.amount,
+        categoryId: updated.categoryId,
+        isRecurring: updated.isRecurring,
+        hasNotes: Boolean(updated.notes),
+        source: "assistant",
+      });
       reportThreshold(
         notifyBudgetThreshold(
           workspaceId,
@@ -170,6 +187,11 @@ export async function applyTransactionProposal(workspaceId: string, proposal: Tr
       }
       emitDataChanged();
       toast.success(`Deleted: ${current.description}`);
+      pendo?.track("transaction_deleted", {
+        transactionType: current.type,
+        amount: current.amount,
+        source: "assistant",
+      });
       return current.id;
     }
   }

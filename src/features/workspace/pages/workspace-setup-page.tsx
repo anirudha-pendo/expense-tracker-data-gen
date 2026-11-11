@@ -32,7 +32,6 @@ export function WorkspaceSetupPage() {
       pendo?.track("workspace_created", {
         currency: values.currency,
         locale: values.locale,
-        workspaceName: values.name,
       });
       navigate("/", { replace: true });
     } catch (err) {
