@@ -177,7 +177,7 @@ Valid-input guidance: any `amount > 0` (form also sets native `min="0.01" step="
 - Opened by: **"Add Transaction"** button (page header) → Add mode; row dropdown **"Edit"** → Edit mode.
 - Title: **"Add Transaction"** or **"Edit Transaction"**.
 - Fields:
-  - **Transaction Type** — Radix `Tabs`, triggers **"Expense"** and **"Income"** (`data-slot="tabs-trigger"`). Default `"expense"` for Add. **Changing this tab resets the Category select to empty** and filters which categories the Category select offers — pick the type tab BEFORE picking a category.
+  - **Transaction Type** — Radix `Tabs`, triggers **"Expense"** and **"Income"** (`data-slot="tabs-trigger"`). Default `"expense"` for Add. **Changing this tab resets the Category select to empty when the picked category doesn't apply to the new type** (a `role="status"` note under Category says so; switching back restores it) and filters which categories the Category select offers — pick the type tab BEFORE picking a category.
   - **Description** — `<Input id="description">`, placeholder "Coffee, Salary, Rent...".
   - **Amount** — `<Input id="amount" type="number" step="0.01" min="0.01">`, placeholder "0.00".
   - **Date** — `<Input id="date" type="date">`.
