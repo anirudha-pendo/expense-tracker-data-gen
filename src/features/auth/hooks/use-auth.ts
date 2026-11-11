@@ -31,7 +31,7 @@ export interface SignUpInput {
 
 interface AuthActions {
   signUp: (input: SignUpInput) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<Workspace | null>;
   signOut: () => void;
   setActiveWorkspace: (workspace: Workspace) => void;
   refreshUser: () => Promise<void>;
@@ -121,7 +121,7 @@ export function useAuth(): AuthState & AuthActions {
     saveSession(session);
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string): Promise<Workspace | null> => {
     // One identical message for "no such account" and "wrong password", on
     // purpose: anything that distinguishes them tells an attacker which
     // emails are registered. Do not split it.
@@ -142,6 +142,7 @@ export function useAuth(): AuthState & AuthActions {
       workspaceId: activeWorkspace?.id ?? "",
     };
     saveSession(session);
+    return activeWorkspace;
   }, []);
 
   const signOut = useCallback(() => {
