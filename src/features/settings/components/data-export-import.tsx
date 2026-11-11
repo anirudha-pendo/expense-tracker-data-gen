@@ -4,11 +4,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getTransactionsByWorkspaceId, createTransaction } from "@/lib/db/repositories/transactions.repo";
-import { getCategoriesByWorkspaceId } from "@/lib/db/repositories/categories.repo";
+import { getCategoriesByWorkspaceId, createCategory } from "@/lib/db/repositories/categories.repo";
 import { getGoalsByWorkspaceId, createGoal } from "@/lib/db/repositories/goals.repo";
 import { getBudgetsByWorkspaceId, upsertBudget } from "@/lib/db/repositories/budgets.repo";
 import { useAuthContext } from "@/features/auth/hooks/auth-context";
-import type { Budget, Goal, Transaction } from "@/types";
+import { buildCategoryIdMap } from "@/features/settings/lib/build-category-id-map";
+import type { Budget, Category, Goal, Transaction } from "@/types";
 
 export function DataExportImport() {
   const { workspace } = useAuthContext();
@@ -91,11 +92,30 @@ export function DataExportImport() {
       const text = await file.text();
       const data = JSON.parse(text) as {
         transactions: Transaction[];
+        categories?: Category[];
         goals?: Goal[];
         budgets?: Budget[];
       };
 
       if (!Array.isArray(data.transactions)) throw new Error("Invalid format: missing transactions array");
+
+      // Build a mapping from exported category IDs to this workspace's
+      // category IDs so transactions and budgets reference real categories.
+      // Older export files may lack categories; in that case the map is
+      // empty and categoryIds pass through unchanged (same as before).
+      const currentCategories = await getCategoriesByWorkspaceId(workspace.id);
+      const exportedCategories = Array.isArray(data.categories) ? data.categories : [];
+      const { idMap: categoryIdMap, newCategories } = buildCategoryIdMap(
+        exportedCategories,
+        currentCategories,
+        workspace.id,
+      );
+
+      let categoriesImported = 0;
+      for (const cat of newCategories) {
+        await createCategory(cat);
+        categoriesImported++;
+      }
 
       let imported = 0;
       for (const tx of data.transactions) {
@@ -103,6 +123,7 @@ export function DataExportImport() {
           ...tx,
           id: crypto.randomUUID(),
           workspaceId: workspace.id,
+          categoryId: categoryIdMap.get(tx.categoryId) ?? tx.categoryId,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -126,16 +147,22 @@ export function DataExportImport() {
       }
       if (Array.isArray(data.budgets)) {
         for (const budget of data.budgets) {
-          await upsertBudget({ ...budget, id: crypto.randomUUID(), workspaceId: workspace.id });
+          await upsertBudget({
+            ...budget,
+            id: crypto.randomUUID(),
+            workspaceId: workspace.id,
+            categoryId: categoryIdMap.get(budget.categoryId) ?? budget.categoryId,
+          });
           budgetsImported++;
         }
       }
 
       pendo?.track("data_imported", {
         transactionsImported: imported,
+        categoriesImported,
         goalsImported,
         budgetsImported,
-        totalItemsImported: imported + goalsImported + budgetsImported,
+        totalItemsImported: imported + categoriesImported + goalsImported + budgetsImported,
       });
 
       const extras = goalsImported + budgetsImported;
