@@ -8,6 +8,7 @@ import assert from "node:assert";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeEmail } from "../src/lib/normalize-email";
 import {
   REGIONS,
   REGION_CURVE,
@@ -1840,6 +1841,21 @@ check("one power and one casual persona see many wordings of one question, none 
       assert.ok(Math.max(...counts.values()) <= 75, `${label}: one template took ${Math.max(...counts.values())} of 300`);
     }
   }
+});
+
+// --- Email normalization (APP-172984) -----------------------------------------
+
+check("normalizeEmail lowercases and trims an email", () => {
+  assert.strictEqual(normalizeEmail("Jane.Doe@Example.com"), "jane.doe@example.com");
+  assert.strictEqual(normalizeEmail("jane.doe@example.com"), "jane.doe@example.com");
+  assert.strictEqual(normalizeEmail("  ALICE@EXAMPLE.COM  "), "alice@example.com");
+  assert.strictEqual(normalizeEmail("Bob@Test.Org"), "bob@test.org");
+});
+
+check("normalizeEmail makes differently-cased variants resolve to the same key", () => {
+  const variants = ["User@Host.COM", "user@host.com", " USER@HOST.COM ", "user@Host.Com"];
+  const normalized = variants.map(normalizeEmail);
+  for (const n of normalized) assert.strictEqual(n, normalized[0], `"${n}" differs from "${normalized[0]}"`);
 });
 
 // --- Summary -----------------------------------------------------------------

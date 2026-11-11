@@ -5,6 +5,7 @@ import { createUser, getUserByEmail, getUserByUsername } from "@/lib/db/reposito
 import { getWorkspacesByUserId } from "@/lib/db/repositories/workspaces.repo";
 import { clearSession, getSession, saveSession } from "@/lib/session";
 import { identify } from "@/lib/analytics";
+import { normalizeEmail } from "@/lib/normalize-email";
 import type { Session, User, Workspace } from "@/types";
 
 interface AuthState {
@@ -82,7 +83,9 @@ export function useAuth(): AuthState & AuthActions {
     loadSession();
   }, [loadSession]);
 
-  const signUp = useCallback(async ({ username, email, displayName, password }: SignUpInput) => {
+  const signUp = useCallback(async ({ username, email: rawEmail, displayName, password }: SignUpInput) => {
+    const email = normalizeEmail(rawEmail);
+
     // Both are unique in IndexedDB, so both are checked up front: email
     // because it is the sign-in identifier, username because its unique
     // index would otherwise reject the write with a raw ConstraintError
@@ -121,7 +124,9 @@ export function useAuth(): AuthState & AuthActions {
     saveSession(session);
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (rawEmail: string, password: string) => {
+    const email = normalizeEmail(rawEmail);
+
     // One identical message for "no such account" and "wrong password", on
     // purpose: anything that distinguishes them tells an attacker which
     // emails are registered. Do not split it.
