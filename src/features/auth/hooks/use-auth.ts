@@ -5,6 +5,7 @@ import { createUser, getUserByEmail, getUserByUsername } from "@/lib/db/reposito
 import { getWorkspacesByUserId } from "@/lib/db/repositories/workspaces.repo";
 import { clearSession, getSession, saveSession } from "@/lib/session";
 import { identify } from "@/lib/analytics";
+import { normalizeEmail } from "@/lib/normalize-email";
 import type { Session, User, Workspace } from "@/types";
 
 interface AuthState {
@@ -83,6 +84,8 @@ export function useAuth(): AuthState & AuthActions {
   }, [loadSession]);
 
   const signUp = useCallback(async ({ username, email, displayName, password }: SignUpInput) => {
+    const canonicalEmail = normalizeEmail(email);
+
     // Both are unique in IndexedDB, so both are checked up front: email
     // because it is the sign-in identifier, username because its unique
     // index would otherwise reject the write with a raw ConstraintError
@@ -90,7 +93,7 @@ export function useAuth(): AuthState & AuthActions {
     const existingUsername = await getUserByUsername(username);
     if (existingUsername) throw new Error("Username is already taken");
 
-    const existingEmail = await getUserByEmail(email);
+    const existingEmail = await getUserByEmail(canonicalEmail);
     if (existingEmail) throw new Error("Email is already registered");
 
     const { hash, salt } = await hashPassword(password);
@@ -104,7 +107,7 @@ export function useAuth(): AuthState & AuthActions {
     const newUser: User = {
       id: crypto.randomUUID(),
       username,
-      email,
+      email: canonicalEmail,
       displayName,
       avatarInitials: initials,
       passwordHash: hash,
@@ -125,7 +128,7 @@ export function useAuth(): AuthState & AuthActions {
     // One identical message for "no such account" and "wrong password", on
     // purpose: anything that distinguishes them tells an attacker which
     // emails are registered. Do not split it.
-    const storedUser = await getUserByEmail(email);
+    const storedUser = await getUserByEmail(normalizeEmail(email));
     if (!storedUser) throw new Error("Invalid email or password");
 
     const valid = await verifyPassword(password, storedUser.passwordHash, storedUser.salt);
