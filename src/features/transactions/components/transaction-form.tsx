@@ -109,6 +109,8 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
         </div>
       </div>
 
+      {attachments && <AttachmentManager manager={attachments} />}
+
       <div className="flex flex-col gap-2">
         <Label htmlFor="category">Category</Label>
         <Select value={categoryId} onValueChange={(v) => setValue("categoryId", v)}>
@@ -152,8 +154,6 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
         />
         {errors.notes && <p className="text-sm text-destructive">{errors.notes.message}</p>}
       </div>
-
-      {attachments && <AttachmentManager manager={attachments} />}
 
       <div className="flex gap-2 justify-end pt-2">
         <Button type="button" variant="outline" onClick={onCancel}>
