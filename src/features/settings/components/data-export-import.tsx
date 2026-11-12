@@ -87,6 +87,8 @@ export function DataExportImport() {
     if (!file || !workspace) return;
     setIsImporting(true);
 
+    // Declared outside the try so a failure can report how far the import got.
+    let imported = 0;
     try {
       const text = await file.text();
       const data = JSON.parse(text) as {
@@ -97,7 +99,6 @@ export function DataExportImport() {
 
       if (!Array.isArray(data.transactions)) throw new Error("Invalid format: missing transactions array");
 
-      let imported = 0;
       for (const tx of data.transactions) {
         const fresh: Transaction = {
           ...tx,
@@ -145,6 +146,19 @@ export function DataExportImport() {
         }`
       );
     } catch (err) {
+      // data_import_failed: the import stopped on a parse, format, or save error.
+      // A JSON SyntaxError message quotes the file's contents, so it's reported
+      // as a fixed string instead.
+      pendo?.track("data_import_failed", {
+        errorMessage:
+          err instanceof SyntaxError
+            ? "Invalid JSON"
+            : err instanceof Error
+              ? err.message.slice(0, 100)
+              : "Unknown error",
+        fileSize: file.size,
+        transactionsBeforeFailure: imported,
+      });
       toast.error(err instanceof Error ? err.message : "Import failed — check the file format");
     } finally {
       setIsImporting(false);

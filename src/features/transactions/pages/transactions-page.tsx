@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { AppLayout } from "@/shared/components/app-layout";
@@ -15,6 +15,9 @@ import { getAttachmentCounts } from "@/lib/db/repositories/attachments.repo";
 import type { TransactionWithCategory } from "../hooks/use-transactions";
 import type { TransactionFormValues } from "../schemas/transaction.schema";
 import type { Transaction } from "@/types";
+
+// How long the filters must stay unchanged before transactions_searched fires.
+const SEARCH_TRACK_DEBOUNCE_MS = 1000;
 
 export function TransactionsPage() {
   const { workspace } = useAuthContext();
@@ -43,7 +46,7 @@ export function TransactionsPage() {
   }, [transactionIdsKey]);
 
   useEffect(() => {
-    refreshAttachmentCounts();
+    refreshAttachmentCounts(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [refreshAttachmentCounts]);
   const [filters, setFilters] = useState<TransactionFilters>({
     search: "",
@@ -67,6 +70,33 @@ export function TransactionsPage() {
       return true;
     });
   }, [transactions, filters]);
+
+  // transactions_searched: one event per settled filter combination, once
+  // typing stops. Keyed on the filters so a list refresh under the same
+  // filters (an add, edit, or delete) doesn't report the search again.
+  const lastTrackedFiltersKey = useRef("");
+  const resultsCount = filteredTransactions.length;
+  const totalTransactions = transactions.length;
+  useEffect(() => {
+    if (isLoading) return;
+    const hasActiveFilters =
+      filters.search !== "" || filters.type !== "all" || filters.categoryId !== "" || filters.month !== "";
+    const filtersKey = hasActiveFilters ? JSON.stringify(filters) : "";
+    const timer = setTimeout(() => {
+      if (filtersKey === lastTrackedFiltersKey.current) return;
+      lastTrackedFiltersKey.current = filtersKey;
+      if (!hasActiveFilters) return;
+      pendo?.track("transactions_searched", {
+        searchLength: filters.search.length,
+        type: filters.type,
+        categoryId: filters.categoryId,
+        month: filters.month,
+        resultsCount,
+        totalTransactions,
+      });
+    }, SEARCH_TRACK_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [filters, isLoading, resultsCount, totalTransactions]);
 
   async function handleAdd(values: TransactionFormValues) {
     try {
