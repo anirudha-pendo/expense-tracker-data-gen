@@ -12,7 +12,7 @@ export function AccessibilityLoopDemo() {
           <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" />
         </svg>
       </button>
-      <a href="/settings">
+      <a href="/settings" aria-label="Settings">
         <svg width="16" height="16" viewBox="0 0 16 16">
           <circle cx="8" cy="8" r="6" fill="currentColor" />
         </svg>
