@@ -1,7 +1,7 @@
 import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { Category } from "@/types";
-import { trackAssistantError, trackAssistantEvent, trackAssistantWrite } from "@/lib/analytics";
+import { trackAssistantError, trackAssistantEvent, trackAssistantReaction, trackAssistantWrite } from "@/lib/analytics";
 import { localIsoDate } from "@/lib/dates";
 import { parseAssistantError } from "../contract/errors";
 import { ASSISTANT_LIMITS } from "../contract/limits";
@@ -319,6 +319,7 @@ export class AssistantController {
     this.startTurn();
     const chat = this.snapshot.chat;
     const last = chat.lastMessage;
+    if (last !== undefined) trackAssistantReaction("retry", { conversationId: chat.id, messageId: last.id });
     if (last !== undefined && this.snapshot.stoppedBeforeReply.has(last.id)) {
       const next = new Set(this.snapshot.stoppedBeforeReply);
       next.delete(last.id);
