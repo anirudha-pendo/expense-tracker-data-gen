@@ -59,7 +59,7 @@ export function updateOptions(user: User, workspace: Workspace | null): void {
 }
 
 // Pendo drops agent events whose agentId is not the id of the agent in Pendo.
-const ASSISTANT_AGENT_ID = "s9FWSJy8gbmM2gAsxZFK3PgmDN8";
+const ASSISTANT_AGENT_ID = "9b-kvH4WUnapfXFVFn71CG8AN10";
 
 export interface AgentEventProps {
   conversationId: string;
@@ -84,6 +84,21 @@ export function trackAssistantEvent(type: "prompt" | "agent_response", props: Ag
     toolsUsed: [],
     ...props,
   });
+}
+
+export type AssistantReaction = "positive" | "negative" | "mixed" | "undo" | "retry";
+
+/**
+ * Report the user's reaction to one assistant message. `messageId` is the id of
+ * the message being reacted to, not a new one, so Pendo can tie the reaction
+ * back to that reply.
+ */
+export function trackAssistantReaction(
+  reaction: AssistantReaction,
+  props: { conversationId: string; messageId: string },
+): void {
+  if (typeof pendo?.trackAgent !== "function") return;
+  pendo.trackAgent("user_reaction", { agentId: ASSISTANT_AGENT_ID, ...props, content: reaction });
 }
 
 export type AssistantWriteOutcome = "confirmed" | "cancelled" | "failed";
