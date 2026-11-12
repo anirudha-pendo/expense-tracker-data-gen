@@ -8,13 +8,13 @@ export function SettingsAccessibilityDemo() {
   return (
     <section>
       <img src="/vite.svg" width={48} height={48} />
-      <button type="button" onClick={() => undefined}>
-        <svg width="16" height="16" viewBox="0 0 16 16">
+      <button type="button" aria-label="Status" onClick={() => undefined}>
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <circle cx="8" cy="8" r="6" fill="currentColor" />
         </svg>
       </button>
-      <button type="button" onClick={() => undefined}>
-        <svg width="16" height="16" viewBox="0 0 16 16">
+      <button type="button" aria-label="Add" onClick={() => undefined}>
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M3 8h10M8 3v10" stroke="currentColor" />
         </svg>
       </button>
@@ -23,7 +23,7 @@ export function SettingsAccessibilityDemo() {
           <rect x="2" y="2" width="12" height="12" fill="currentColor" />
         </svg>
       </a>
-      <input type="text" placeholder="Display name" />
+      <input type="text" aria-label="Display name" placeholder="Display name" />
     </section>
   );
 }
