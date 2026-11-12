@@ -6,8 +6,8 @@
 export function AccessibilityLoopDemo() {
   return (
     <div>
-      <img src="/vite.svg" width={32} height={32} />
-      <button type="button" onClick={() => undefined}>
+      <img src="/vite.svg" alt="Vite logo" width={32} height={32} />
+      <button type="button" aria-label="Close" onClick={() => undefined}>
         <svg width="16" height="16" viewBox="0 0 16 16">
           <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" />
         </svg>
@@ -17,7 +17,7 @@ export function AccessibilityLoopDemo() {
           <circle cx="8" cy="8" r="6" fill="currentColor" />
         </svg>
       </a>
-      <input type="text" placeholder="Search" />
+      <input type="text" placeholder="Search" aria-label="Search" />
     </div>
   );
 }
