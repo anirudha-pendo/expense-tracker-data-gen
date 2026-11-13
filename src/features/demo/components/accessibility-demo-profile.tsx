@@ -6,8 +6,8 @@
 export function ProfileAccessibilityDemo() {
   return (
     <section>
-      <img src="/vite.svg" width={40} height={40} />
-      <button type="button" onClick={() => undefined}>
+      <img src="/vite.svg" alt="Vite logo" width={40} height={40} />
+      <button type="button" aria-label="Profile action" onClick={() => undefined}>
         <svg width="16" height="16" viewBox="0 0 16 16">
           <path d="M3 3h10v10H3z" stroke="currentColor" fill="none" />
         </svg>
@@ -17,7 +17,7 @@ export function ProfileAccessibilityDemo() {
           <circle cx="8" cy="8" r="5" fill="currentColor" />
         </svg>
       </a>
-      <input type="email" placeholder="Email address" />
+      <input type="email" aria-label="Email address" placeholder="Email address" />
     </section>
   );
 }
