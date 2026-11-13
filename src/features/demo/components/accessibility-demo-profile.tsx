@@ -12,7 +12,7 @@ export function ProfileAccessibilityDemo() {
           <path d="M3 3h10v10H3z" stroke="currentColor" fill="none" />
         </svg>
       </button>
-      <a href="/account">
+      <a href="/account" aria-label="Account">
         <svg width="16" height="16" viewBox="0 0 16 16">
           <circle cx="8" cy="8" r="5" fill="currentColor" />
         </svg>
