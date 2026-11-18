@@ -56,6 +56,7 @@ import {
   NEW_VISITOR_ACTIONS,
   NEW_VISITOR_ARCHETYPE,
   NEW_VISITOR_CURRENCY_CHANGE_RATE,
+  NEW_VISITOR_FIRST_TRANSACTION_ABANDON_RATE,
   NEW_VISITOR_LOCALE_CHANGE_RATE,
   NEW_VISITOR_RATE,
   NEW_VISITOR_SHOW_PASSWORD_RATE,
@@ -349,6 +350,7 @@ function formatPlan(plan: SessionPlan, totalOverride: number | null): string {
     `planned        ${plan.total} session(s) — ${perRegionSummary(plan.perRegion)}` +
       ` (${requested - plan.total} dropped by the show-up gate)`,
     `new visitors   ${newVisitors} (${share.toFixed(0)}% of planned, target ${(NEW_VISITOR_RATE * 100).toFixed(0)}%)`,
+    `first entry    ${(NEW_VISITOR_FIRST_TRANSACTION_ABANDON_RATE * 100).toFixed(0)}% of new visitors abandon Add Transaction by script`,
     `count from     ${totalOverride === null ? "the traffic curve" : `BOT_SESSIONS=${totalOverride}`}`,
     `shortfall      SHOW_UP_SHORTFALL=${SHOW_UP_SHORTFALL}`,
     "",
@@ -684,8 +686,15 @@ async function driveSession(
   pendo.reading = await checkPendo(() => readPendoState(page), null, ctx.log);
   // First act of a fresh account is to put something in it. That is what a
   // real first session looks like, and it leaves the remaining steps a
-  // workspace with data rather than an empty one.
-  await runStep(page, ctx, counters, actionByName("addTransaction"));
+  // workspace with data rather than an empty one. Its abandon chance is the
+  // funnel's scripted baseline — see NEW_VISITOR_FIRST_TRANSACTION_ABANDON_RATE.
+  // The copy shares rng, log and assistant state; only the rate differs.
+  await runStep(
+    page,
+    { ...ctx, abandonRate: NEW_VISITOR_FIRST_TRANSACTION_ABANDON_RATE },
+    counters,
+    actionByName("addTransaction"),
+  );
   const steps = ctx.rng.int(NEW_VISITOR_WALK_MIN, NEW_VISITOR_WALK_MAX);
   ctx.log(`walking ${steps} step(s) as a new visitor`);
   await driveWalk(page, ctx, counters, NEW_VISITOR_ACTION_POOL, Math.max(0, steps - 1));
