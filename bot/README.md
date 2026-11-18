@@ -144,6 +144,7 @@ what they affect.
 | `NEW_VISITOR_SHOW_PASSWORD_RATE` (0.35) | A signing-up visitor clicks "Show password". | 0–1. |
 | `NEW_VISITOR_CURRENCY_CHANGE_RATE` / `NEW_VISITOR_LOCALE_CHANGE_RATE` (0.6 each) | Workspace setup changes the currency/locale away from its default. | 0–1. |
 | `NEW_VISITOR_ABANDON_RATE` (0.3) | A new visitor bails out of a multi-step flow mid-way. Used instead of the borrowed `explorer` archetype's own 0.45 — see the code comment for why. | 0.1–0.5. |
+| `NEW_VISITOR_FIRST_TRANSACTION_ABANDON_RATE` (0.3) | A new visitor abandons the Add Transaction dialog that is always their first action. This is the scripted floor of the signup-to-first-transaction funnel's drop-off: compare measured drop-off against it before reading it as form friction. The dry run prints it. | 0–0.5. |
 
 ### Timeouts (all in milliseconds)
 

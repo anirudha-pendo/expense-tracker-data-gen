@@ -485,6 +485,19 @@ export const NEW_VISITOR_ARCHETYPE: Archetype = "explorer";
 export const NEW_VISITOR_ABANDON_RATE = 0.3;
 
 /**
+ * The chance a new visitor's first action — the Add Transaction dialog opened
+ * straight after workspace setup — is abandoned: a description is typed, then
+ * the dialog is closed without saving. This is a scripted drop, not a
+ * reaction to the form, so it sets the floor of the signup-to-first-
+ * transaction funnel's drop-off on its own. Compare any measured new-visitor
+ * drop-off against this rate before reading it as form friction, and against
+ * it again after a form change. Its own knob, separate from
+ * NEW_VISITOR_ABANDON_RATE, so that baseline can be read and tuned without
+ * shifting the rest of the new-visitor walk.
+ */
+export const NEW_VISITOR_FIRST_TRANSACTION_ABANDON_RATE = 0.3;
+
+/**
  * How many actions a new visitor takes after finishing sign-up and workspace
  * setup. Shorter than any archetype's session length on purpose: signing up
  * and creating a workspace is already most of a first session.
