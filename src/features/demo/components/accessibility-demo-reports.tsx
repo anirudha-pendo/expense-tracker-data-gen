@@ -15,13 +15,13 @@ export function ReportsAccessibilityDemo() {
       <img src="/icons.svg" width={96} height={64} />
       <img src="/favicon.svg" alt="Spending by category chart" width={96} height={64} />
 
-      <button type="button" onClick={() => undefined}>
-        <svg width="16" height="16" viewBox="0 0 16 16">
+      <button type="button" aria-label="Download" onClick={() => undefined}>
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 2v8M4 7l4 4 4-4M3 13h10" stroke="currentColor" fill="none" />
         </svg>
       </button>
-      <div role="button" tabIndex={0} onClick={() => undefined}>
-        <svg width="16" height="16" viewBox="0 0 16 16">
+      <div role="button" tabIndex={0} aria-label="Reload" onClick={() => undefined}>
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M2 8a6 6 0 1 1 2 4.5" stroke="currentColor" fill="none" />
         </svg>
       </div>
