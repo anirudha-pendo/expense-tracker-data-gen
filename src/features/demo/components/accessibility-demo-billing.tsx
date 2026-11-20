@@ -30,7 +30,10 @@ export function BillingAccessibilityDemo() {
       </a>
 
       <textarea placeholder="Note for the invoice" rows={3} />
-      <input type="checkbox" defaultChecked />
+      <label>
+        <input type="checkbox" defaultChecked />
+        Email me a receipt
+      </label>
       <input type="text" placeholder="Card holder name" autoComplete="cc-name" />
       <label>
         Billing email
