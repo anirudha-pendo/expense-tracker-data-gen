@@ -170,6 +170,7 @@ export function TransactionsPage() {
           </DialogHeader>
           <TransactionForm
             categories={categories}
+            recentTransactions={transactions}
             attachments={addAttachments}
             onSubmit={handleAdd}
             onCancel={() => {

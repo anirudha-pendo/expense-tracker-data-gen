@@ -18,12 +18,21 @@ import type { Category, Transaction } from "@/types";
 interface TransactionFormProps {
   categories: Category[];
   defaultValues?: Partial<Transaction>;
+  /** Existing transactions, used to preselect the most recently used category for the chosen type. */
+  recentTransactions?: Pick<Transaction, "type" | "categoryId" | "createdAt">[];
   attachments?: UseAttachmentsReturn;
   onSubmit: (values: TransactionFormValues) => Promise<void>;
   onCancel: () => void;
 }
 
-export function TransactionForm({ categories, defaultValues, attachments, onSubmit, onCancel }: TransactionFormProps) {
+export function TransactionForm({
+  categories,
+  defaultValues,
+  recentTransactions,
+  attachments,
+  onSubmit,
+  onCancel,
+}: TransactionFormProps) {
   const {
     register,
     handleSubmit,
@@ -53,11 +62,21 @@ export function TransactionForm({ categories, defaultValues, attachments, onSubm
     (c) => c.scope === type || c.scope === "both"
   );
 
+  // The category this workspace most recently used for the chosen type, if it
+  // is still offered; "" leaves the select on its placeholder.
+  const defaultCategoryId =
+    (recentTransactions ?? [])
+      .filter((t) => t.type === type && filteredCategories.some((c) => c.id === t.categoryId))
+      .reduce<Pick<Transaction, "categoryId" | "createdAt"> | null>(
+        (latest, t) => (!latest || t.createdAt > latest.createdAt ? t : latest),
+        null
+      )?.categoryId ?? "";
+
   useEffect(() => {
     const current = categoryId;
     const isValid = filteredCategories.some((c) => c.id === current);
-    if (!isValid) setValue("categoryId", "");
-  }, [type, filteredCategories, categoryId, setValue]);
+    if (!isValid && current !== defaultCategoryId) setValue("categoryId", defaultCategoryId);
+  }, [type, filteredCategories, categoryId, defaultCategoryId, setValue]);
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
