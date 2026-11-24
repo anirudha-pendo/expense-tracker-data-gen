@@ -8,7 +8,7 @@
 export function BillingAccessibilityDemo() {
   return (
     <div>
-      <img src="/favicon.svg" width={24} height={24} />
+      <img src="/favicon.svg" alt="Expense tracker logo" width={24} height={24} />
       <img src="/icons.svg" alt="" width={24} height={24} />
       <svg role="img" width="20" height="20" viewBox="0 0 20 20">
         <rect x="2" y="4" width="16" height="12" rx="2" fill="currentColor" />
@@ -29,9 +29,14 @@ export function BillingAccessibilityDemo() {
         </svg>
       </a>
 
-      <textarea placeholder="Note for the invoice" rows={3} />
+      <textarea aria-label="Note for the invoice" placeholder="Note for the invoice" rows={3} />
       <input type="checkbox" aria-label="Pay invoices automatically" defaultChecked />
-      <input type="text" placeholder="Card holder name" autoComplete="cc-name" />
+      <input
+        type="text"
+        aria-label="Card holder name"
+        placeholder="Card holder name"
+        autoComplete="cc-name"
+      />
       <label>
         Billing email
         <input type="email" />
