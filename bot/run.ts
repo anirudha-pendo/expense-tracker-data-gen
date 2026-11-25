@@ -152,8 +152,9 @@ const NEW_VISITOR_ACCOUNT_ID = "acct-new-visitor";
 
 /**
  * Splits `total` across `weights` by largest remainder, so the parts always
- * sum to exactly `total`. Used only for BOT_SESSIONS, which has to be honoured
- * to the session while still landing in the regions the curve favours.
+ * sum to exactly `total`. Used for BOT_SESSIONS, which has to be honoured
+ * to the session while still landing in the regions the curve favours, and
+ * for spreading a run's fixed new-visitor count across the regions.
  */
 function apportion(total: number, weights: number[]): number[] {
   const sum = weights.reduce((acc, w) => acc + w, 0);
@@ -249,6 +250,23 @@ export function buildPlan(now: Date, totalOverride: number | null = null): Sessi
     });
   }
 
+  // A fixed NEW_VISITOR_RATE share of the run's requested slots, not a coin
+  // flip per slot. A per-slot draw let chance alone move the weekly sign-up
+  // and Create Workspace counts; a set count ties them to planned traffic.
+  // Counted from requested slots, before the show-up gate, because new
+  // visitors never come from the gated persona pool.
+  const newVisitorTotal = Math.round(
+    REGIONS.reduce((acc, region) => acc + requestedPerRegion[region], 0) * NEW_VISITOR_RATE,
+  );
+  const newVisitorShares = apportion(
+    newVisitorTotal,
+    REGIONS.map((region) => requestedPerRegion[region]),
+  );
+  const newVisitorsPerRegion = {} as Record<Region, number>;
+  REGIONS.forEach((region, i) => {
+    newVisitorsPerRegion[region] = newVisitorShares[i];
+  });
+
   const perRegion = {} as Record<Region, number>;
   const sessions: PlannedSession[] = [];
 
@@ -269,10 +287,8 @@ export function buildPlan(now: Date, totalOverride: number | null = null): Sessi
     for (let slot = 0; slot < requestedPerRegion[region]; slot++) {
       const index = sessions.length + 1;
       const seed = `session:${now.toISOString()}:${index}`;
-      // `chance` is drawn first either way, so a region whose gated pool runs
-      // dry does not shift the PRNG stream for the slots after it.
-      const drewNewVisitor = rng.chance(NEW_VISITOR_RATE);
-      if (drewNewVisitor || (showingUp.length === 0 && SHOW_UP_SHORTFALL === "new-visitor")) {
+      const isNewVisitorSlot = slot < newVisitorsPerRegion[region];
+      if (isNewVisitorSlot || (showingUp.length === 0 && SHOW_UP_SHORTFALL === "new-visitor")) {
         sessions.push({
           index,
           region,
