@@ -181,7 +181,7 @@ Valid-input guidance: any `amount > 0` (form also sets native `min="0.01" step="
   - **Description** — `<Input id="description">`, placeholder "Coffee, Salary, Rent...".
   - **Amount** — `<Input id="amount" type="number" step="0.01" min="0.01">`, placeholder "0.00".
   - **Date** — `<Input id="date" type="date">`.
-  - **Category** — Radix `<Select id="category">`, placeholder "Select a category"; options = categories where `scope === type || scope === "both"`. In Add mode it is prefilled with the category of the workspace's most recently created transaction of the chosen type (by `createdAt`), so it shows the placeholder only when there is none.
+  - **Category** — Radix `<Select id="category">`, placeholder "Select a category"; options = categories where `scope === type || scope === "both"`. In Add mode it is prefilled with the category of the workspace's most recently created transaction of the chosen type (by `createdAt`), so it shows the placeholder only when there is none. Until the select is opened or changed, it also follows the Description: Quick Add's `inferCategory` (`src/features/quick-add/lib/category-inference.ts`) replaces the prefill when it finds a match, and the prefill returns when it doesn't. Opening the select stops this, so pick the category before typing the description to keep the picked one.
   - **Recurring** — Radix `<Switch id="isRecurring">`, label "Recurring" — not RHF-registered. Use `.click()`, not `.check()`.
   - **Notes** — `<Textarea id="notes">`, placeholder "Any additional details...", optional (max 500).
   - **Cancel** button — closes without saving.
