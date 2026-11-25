@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
@@ -12,14 +12,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { transactionSchema, type TransactionFormValues } from "../schemas/transaction.schema";
 import { AttachmentManager } from "./attachment-manager";
+import { buildKeywordIndex, inferCategory } from "@/features/quick-add/lib/category-inference";
 import type { UseAttachmentsReturn } from "../hooks/use-attachments";
 import type { Category, Transaction } from "@/types";
 
 interface TransactionFormProps {
   categories: Category[];
   defaultValues?: Partial<Transaction>;
-  /** Existing transactions, used to preselect the most recently used category for the chosen type. */
-  recentTransactions?: Pick<Transaction, "type" | "categoryId" | "createdAt">[];
+  /**
+   * Existing transactions, used to preselect the most recently used category for
+   * the chosen type and to suggest one from the description, as Quick Add does.
+   */
+  recentTransactions?: Transaction[];
   attachments?: UseAttachmentsReturn;
   onSubmit: (values: TransactionFormValues) => Promise<void>;
   onCancel: () => void;
@@ -57,6 +61,10 @@ export function TransactionForm({
   const type = watch("type");
   const isRecurring = watch("isRecurring");
   const categoryId = watch("categoryId");
+  const description = watch("description");
+  // Set once the person opens or changes the Category select, so a suggestion
+  // never replaces a category they chose or looked at.
+  const [categoryPicked, setCategoryPicked] = useState(false);
 
   const filteredCategories = categories.filter(
     (c) => c.scope === type || c.scope === "both"
@@ -77,6 +85,22 @@ export function TransactionForm({
     const isValid = filteredCategories.some((c) => c.id === current);
     if (!isValid && current !== defaultCategoryId) setValue("categoryId", defaultCategoryId);
   }, [type, filteredCategories, categoryId, defaultCategoryId, setValue]);
+
+  const keywordIndex = useMemo(() => buildKeywordIndex(recentTransactions ?? []), [recentTransactions]);
+
+  // In Add mode, until a category is picked by hand, follow the description
+  // with Quick Add's inference, falling back to the most recently used one.
+  const inference = inferCategory(description, filteredCategories, keywordIndex, type);
+  const suggestedCategoryId =
+    !defaultValues && !categoryPicked
+      ? (!inference.guessed && inference.category?.id) || defaultCategoryId
+      : null;
+
+  useEffect(() => {
+    if (suggestedCategoryId !== null && suggestedCategoryId !== categoryId) {
+      setValue("categoryId", suggestedCategoryId);
+    }
+  }, [suggestedCategoryId, categoryId, setValue]);
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
@@ -130,7 +154,14 @@ export function TransactionForm({
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="category">Category</Label>
-        <Select value={categoryId} onValueChange={(v) => setValue("categoryId", v)}>
+        <Select
+          value={categoryId}
+          onOpenChange={(open) => open && setCategoryPicked(true)}
+          onValueChange={(v) => {
+            setCategoryPicked(true);
+            setValue("categoryId", v);
+          }}
+        >
           <SelectTrigger id="category" aria-invalid={!!errors.categoryId}>
             <SelectValue placeholder="Select a category" />
           </SelectTrigger>
